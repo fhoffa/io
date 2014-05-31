@@ -1,10 +1,14 @@
 // Run the simulation nsteps at a time, relinquishing control every nsteps
 // so other updates can occur during the simulation.
-// simulation(state, initialize_callback, update_callback, finished_callback)
-var simulation = (function() {
-  
-  var nmatches = 10000;
-  var nstep = 500;
+// simulation({
+//   state: ...,
+//   matches: 10000,
+//   step: 500,
+//   initialization_callback,
+//   update_callback,
+//   finished_callback
+// })
+var simulate = (function() {
 
   // HELPER FUNCTIONS
   // Pick a coordinate in the field (not right on the edge, or near it).
@@ -235,16 +239,21 @@ var simulation = (function() {
   }
 
   // Return a function that can be used iteratively run the state machine.
-  return function(state, initialize, updated, finished) {
- 
+  return function(simulation) {
+
+    var state = simulation.state;
+
+    // Initialize the state 
     if(!state.initialized) {
-      clear(state);
       state.initialized = true;
-      initialize(state);
       state.match = 0;
       state.controlling_team = 0;
       state.controlling_player = 9;
       state.history = [];
+      clear(state);
+      simulation.initialization_callback(state);
+      simulation.matches = simulation.matches || 10000;
+      simulation.step = simulation.step || 500;
     }
   
     // Simulate one step in the game
@@ -275,7 +284,7 @@ var simulation = (function() {
     function step() {
 
       // Take n steps
-      for(var i = 0; i < nstep; i++) {
+      for(var i = 0; i < simulation.step; i++) {
 	simulate_step(state);
 	// Reset match if enough steps have happened
         if(state.step > event_max) {
@@ -286,13 +295,13 @@ var simulation = (function() {
       }
 
       // Invoke the callback
-      updated(state);
+      simulation.update_callback(state);
 
       // Schedule next task
-      if(state.match < nmatches) {
+      if(state.match < simulation.matches) {
         setTimeout(step, 0);
       } else {
-        finished(state);
+        simulation.finished_callback(state);
       }
   
     }

@@ -307,14 +307,6 @@ window.onload = function() {
   // Expand an array up to x elements
   function expand(a, x) { while(a.length <= x) { a.push(0); } }
 
-  function clone(o) {
-    var r = {};
-    for (var i in o) {
-     r[i] = o[i];
-    }
-    return r;
-  }
-
   // Convert state.history into score probabilities
   // Returns: [ {x, y, ...}, {x, y, ...}, ... ]
   function to_outcome_probability(state) {
@@ -418,21 +410,26 @@ window.onload = function() {
     success: function(player) { forward = JSON.parse(player); }
   });
 
+  function clone(o) {
+    var r = {};
+    for (var i in o) {
+     r[i] = o[i];
+    }
+    return r;
+  }
+
   // Select roster
   var state = {
     team: [[clone(goalkeeper), clone(defender), clone(defender), clone(defender), clone(midfielder), clone(midfielder), clone(midfielder), clone(forward), clone(forward), clone(forward)],
            [clone(goalkeeper), clone(defender), clone(defender), clone(defender), clone(midfielder), clone(midfielder), clone(midfielder), clone(forward), clone(forward), clone(forward)]]
   };
 
-  // Simulate
-  simulation(
-    state,
-    // initialize callback 
-    function(state) {
+  simulate({
+    state: state,
+    initialization_callback: function(state) {
       paintField(state);
     },
-    // progress callback 
-    function(state) {
+    update_callback: function(state) {
       // Paint during the simulation so progress is visible
       if(state.match % 5 == 0) {
         paintField(state);
@@ -441,13 +438,11 @@ window.onload = function() {
         }
       }
     }, 
-    // finished callback 
-    function(state) {
+    finished_callback: function(state) {
       paintField(state);
       paintGraphs(state);
     }
-
-  );
+  });
 
 }
 </script>
