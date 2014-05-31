@@ -116,7 +116,7 @@ window.onload = function() {
   var paintGraphs = function(state) {
 
     // CREATE GRAPH
-    var padding = 25;
+    var padding = 35;
     var w = 400;
     var h = 250;
 
@@ -189,10 +189,11 @@ window.onload = function() {
                     .orient("bottom")
                     .ticks(5);
     
+    var maxy = d3.max(bardataset, function(d) { return d.value; });
     var barYAxis = d3.svg.axis()
                     .scale(barYScale)
                     .orient("left")
-                    .ticks(5);
+                    .tickFormat(function(d) { return (maxy-d).toFixed(2).toString().substr(1, 3); });
 
     barchart.append("g")
        .attr("class", "xaxis")
@@ -260,6 +261,7 @@ window.onload = function() {
 
       // Bar Chart
       var bardataset = to_outcome_distribution(state);
+
       var barXScale = d3.scale.linear()
                           .domain([0,d3.max(bardataset, function(d) { return d.x; })])
 			  .range([padding, w-padding], .1);
@@ -272,13 +274,14 @@ window.onload = function() {
                     .orient("bottom")
                     .ticks(5);
 
+      var maxy = d3.max(bardataset, function(d) { return d.value; });
       var barYAxis = d3.svg.axis()
                     .scale(barYScale)
                     .orient("left")
-                    .ticks(5);
+                    .tickFormat(function(d) { return (maxy-d).toFixed(2).toString().substr(1); });
 
-      barchart.select('.xaxis').transition().duration(10).call(xAxis);
-      barchart.select('.yaxis').transition().duration(10).call(yAxis);
+      barchart.select('.xaxis').transition().duration(10).call(barXAxis);
+      barchart.select('.yaxis').transition().duration(10).call(barYAxis);
 
       var barsize = Math.min(w/(bardataset.length/2), 24) - 2;
       barchart.selectAll("rect")
@@ -339,11 +342,13 @@ window.onload = function() {
   //            [ {x, value, ...}, {x, value, ...}, ... ] ]
   function to_outcome_distribution(state) {
     var v = [[], []];
+    var total = 0;
     for(var i = 0; i < state.history.length; i++) {
       var k0 = state.history[i][0];
       var k1 = state.history[i][1];
       expand(v[0], k0); v[0][k0]++;
       expand(v[1], k1); v[1][k1]++;
+      total++;
     }
     var result = [[], []];
     for(var team = 0; team < result.length; team++) {
@@ -351,14 +356,13 @@ window.onload = function() {
         result[team].push({
           team: team,
           x: i,
-          value: v[team][i],
+          value: v[team][i]/total,
           color:  ((team == 0) ? '#0066ff' : '#ff5050')
         });
       }
     }
-    var result2 = result[0];
-    for(var x in result[1]) { result2.push(result[1][x]); }
-    return result2;
+    for(var x in result[1]) { result[0].push(result[1][x]); }
+    return result[0];
   }
 
   // Convert state.history into outcome probabilities
