@@ -241,6 +241,10 @@ var simulation = (function() {
       clear(state);
       state.initialized = true;
       initialize(state);
+      state.match = 0;
+      state.controlling_team = 0;
+      state.controlling_player = 9;
+      state.history = [];
     }
   
     // Simulate one step in the game
