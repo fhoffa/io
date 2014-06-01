@@ -63,13 +63,14 @@ def runTeam(data, ignore_cols, target_col):
                           # (4, check_ge(4))
                           ]:    
     y = [test_f(yval) for yval in y_train]
-    models.append((param, test_f, build_model(y, X_train2)))
+    features = featureSelect(y, X_train2)
+    models.append((param, test_f, build_model(y, X_train2[features]), features))
     
   count = len(data[target_col])
 
   all_predictions = []
-  for (param, test_f, model) in models:
-    predictions = model.predict(X_test2)
+  for (param, test_f, model, features) in models:
+    predictions = model.predict(X_test2[features])
     base_count = sum([test_f(yval) for yval in data[target_col]])
     baseline = base_count * 1.0 / count
     y = [test_f(yval) for yval in y_test]
@@ -114,6 +115,7 @@ def drop_unbalanced_matches(data):
         else:
             keep.append(False)
             i += 1
+    while len(keep) < len(data): keep.append(False)
     return data[keep]
 
 def split(data, target_col):
@@ -142,18 +144,61 @@ def extract_target(data, target_col):
 def check_ge(n): return lambda (x): int(x) >= int(n)
 def check_eq(n): return lambda (x): int(x) == int(n)
 
+def featureSelect(y, X):
+  if False:
+    logit = sm.Logit(y, X)
+    result =  logit.fit(maxiter=1024)
+    keep_cols = []
+    bse = result.bse
+    params = result.params
+    for ii in xrange(len(X.columns)):
+      param = abs(params[ii])
+      err = bse[ii]
+      if param - err / 2 > 0:
+	keep_cols.append(X.columns[ii])
+    return keep_cols
+  else:
+    print "Features: %s" % (X.columns,) 
+    return X.columns
+
 def build_model(y, X):
   logit = sm.Logit(y, X)
   return logit.fit(maxiter=1024)
 
-def validate(k, y, predictions, baseline, ground_fn=round, compute_auc=False):
+def classify(probabilities, proportions, levels=None):
+  if not levels: levels = [False, True]
+  zipped = zip(probabilities, range(len(probabilities)))
+  zipped = sorted(zipped, key=lambda tup: tup[0])
+  predictions = []
+  label_index = 0
+  split_indexes = []
+  split_start = 0.0
+  proportions = normalize(proportions)
+  for proportion in proportions:
+    split_start += proportion * len(probabilities)
+    split_indexes.append(split_start)
+
+  for i in xrange(len(zipped)):
+    (prob, initial_index) = zipped[i]
+    while i > split_indexes[label_index]: label_index += 1
+    predicted = levels[label_index]
+    predictions.append((prob, predicted, initial_index))
+  
+  predictions.sort(key=lambda tup: tup[2]) 
+  _, results, _ = zip(*predictions)
+  return results
+
+def validate(k, y, predictions, baseline, compute_auc=False):
 
   if len(y) <> len(predictions):
     raise Exception("Length mismatch %d vs %d" % (len(y), len(predictions)))
+  if baseline > 1.0:
+    # Baseline number is expected count, not proportion. Get the proportion.
+    baseline = baseline * 1.0 / len(y)
 
   # print "Validating %d entries" % (len(y),)
   zipped = zip(y, predictions)
-  zipped.sort(key=lambda tup: -tup[1])
+  zipped = sorted(zipped, key=lambda tup: -tup[1])
   expect = len(y) * baseline
   
   (tp, tn, fp, fn) = (0, 0, 0, 0)
@@ -178,15 +223,15 @@ def validate(k, y, predictions, baseline, ground_fn=round, compute_auc=False):
 
   p = tp + fn
   n = tn + fp
-  # Lift = P(1 | t) / P(1)
-  denom = p * baseline
-  lift = (tp * 1.0 / denom) if denom > 0 else 0.0
-            
   # P(1 | predicted(1)) and P(0 | predicted(f))
   pred_t = tp + fp
   pred_f = tn + fn
   p1_t = tp * 1.0 / pred_t if pred_t > 0.0 else -1.0
   p0_f = tn * 1.0 / pred_f if pred_f > 0.0 else -1.0
+            
+  # Lift = P(1 | t) / P(1)
+  p1 = p * 1.0 / (p + n)
+  lift = p1_t / p1 if p1 > 0 else 0.0
             
   accuracy = (tp + tn) * 1.0 / len(y)
             
@@ -219,7 +264,7 @@ def clone_and_drop(data, drop_cols):
     return clone
 
 def normalize(vec):
-    total = sum(vec)
+    total = float(sum(vec))
     return [val / total for val in vec]
 
 def teamTest(y):
@@ -290,7 +335,7 @@ def teamGamePredict(all_predictions, cnt):
         elif dW < -thresh: current = 0
         else: current = 1    
         
-        print "P0: %s, P1: %s, pred: %d" % (p0, p1, current)
+        # print "P0: %s, P1: %s, pred: %d" % (p0, p1, current)
         predictions.append(current) 
         # predictions.append(expect0)
     return predictions
@@ -303,12 +348,14 @@ def teamGamePredictNoDraw(all_predictions, cnt):
         
         dW = pW0 - pW1
         
+        predictions.append(dW)
+        """
         current = -1
-        thresh = 0.1
+        thresh = 0.05
         if dW > thresh: current = 3
         elif dW < -thresh: current = 0
         else: current = 1    
-        
+        """
         # expect0 = predictWl(p0)
         # expect1 = predictWl(p1)
         """
@@ -322,8 +369,8 @@ def teamGamePredictNoDraw(all_predictions, cnt):
             # Difference of opinion.
             current = 1
         """
-        print "P0: %s, P1: %s, pred: %d" % (pW0, pW1, current)
-        predictions.append(current) 
+        # print "P0: %s, P1: %s, pred: %d" % (pW0, pW1, current)
+        # predictions.append(current) 
         # predictions.append(expect0)
     return predictions
 
@@ -340,13 +387,14 @@ def runGame(data, ignore_cols, target_col):
                           (0, check_eq(0))
                          ]:
     y = [test_f(yval) for yval in y_train]
-    models.append((param, test_f, build_model(y, X_train2)))
+    features = featureSelect(y, X_train2)
+    models.append((param, test_f, build_model(y, X_train2[features]), features))
     
   count = len(data[target_col])
 
   all_predictions = []
-  for (param, test_f, model) in models:
-    predictions = model.predict(X_test2)
+  for (param, test_f, model, features) in models:
+    predictions = model.predict(X_test2[features])
     base_count = sum([test_f(yval) for yval in data[target_col]])
     baseline = base_count * 1.0 / count
     print "Count: %d / Baseline %f" % (base_count, baseline)
@@ -387,17 +435,16 @@ def runGameNoDraw(data, ignore_cols, target_col):
   X_train2 = coerceDf(clone_and_drop(X_train, ignore_cols))    
   X_test2 = coerceDf(clone_and_drop(X_test, ignore_cols))
 
-  models = []
   (param, test_f) = (3, check_eq(3)) 
   y = [test_f(yval) for yval in y_train]
-  model = build_model(y, X_train2)
-  models.append((param, test_f, model))
+  features = featureSelect(y, X_train2)
+  model = build_model(y, X_train2[features])
   print '%s: %s: %s' % (target_col, param, model.summary())
     
   count = len(data[target_col])
 
   all_predictions = []
-  predictions = model.predict(X_test2)
+  predictions = model.predict(X_test2[features])
   base_count = sum([test_f(yval) for yval in data[target_col]])
   baseline = base_count * 1.0 / count
   print "Count: %d / Baseline %f" % (base_count, baseline)
@@ -406,55 +453,62 @@ def runGameNoDraw(data, ignore_cols, target_col):
   # print y
   validate(param, y, predictions, baseline, compute_auc=True)
     
-  team_predictions = teamGamePredictNoDraw(predictions, len(y_test))
+  probabilities = teamGamePredictNoDraw(predictions, len(y_test))
   all_team_results = teamTest(data['points'])
   test_team_results = teamTest(y_test)
-  zips = zip(team_predictions, test_team_results)
-  print (zips)
 
+  lose_count = sum([pts == 0 for pts in all_team_results])
+  draw_count = sum([pts == 1 for pts in all_team_results])
+  win_count = sum([pts == 3 for pts in all_team_results])
+  predicted = classify(probabilities, [lose_count, draw_count, win_count],
+    [0, 1, 3])
   validate('w', 
            [pts == 3 for pts in test_team_results], 
-           [1.0 if pts == 3 else 0.0 for pts in team_predictions],
-           sum([pts == 3 for pts in all_team_results]) * 1.0 / len(all_team_results))
+           [1.0 if cl == 3 else 0.0 for cl in predicted],
+            win_count)
   validate('d', 
            [int(pts) == 1 for pts in test_team_results], 
-           [1.0 if int(pts) == 1 else 0.0 for pts in team_predictions],
-           sum([pts == 1 for pts in all_team_results]) * 1.0 / len(all_team_results))
+           [1.0 if cl == 1 else 0.0 for cl in predicted],
+           draw_count)
   validate('l', 
            [int(pts) == 0 for pts in test_team_results], 
-           [1.0 if int(pts) == 0 else 0.0 for pts in team_predictions],
-           sum([pts == 0 for pts in all_team_results]) * 1.0 / len(all_team_results))
-  print ("W/L/D %d/%d/%s",
-    sum([int(pred) == 3 for pred in team_predictions]), 
-    sum([int(pred) == 0 for pred in team_predictions]), 
-    sum([int(pred) == 1 for pred in team_predictions])) 
+           [1.0 if cl == 0 else 0.0 for cl in predicted],
+           lose_count)
+  print "W/L/D %d/%d/%s" % (win_count, lose_count, draw_count)
+  print zip(X_train['team_name'],X_train['op_team_name'], X_train['matchid'], X_train['is_home'],  predictions)
+  zips = zip(predicted, test_team_results)
   correct = sum([int(pred) == int(res) for (pred, res) in zips])
-  print confusion_matrix(test_team_results, team_predictions)
+  print confusion_matrix(test_team_results, predicted)
   print "Pct correct = %d/%d=%g" % (correct, len(zips), correct * 1.0 / len(zips))
 
 
 def runSimple(data, ignore_cols):
   target_col = 'points'
   (train, test) = split(data, target_col)
+  print  test.describe()
+  print test.std()
   (y_test, X_test) = extract_target(test, target_col)
   (y_train, X_train) = extract_target(train, target_col)
   X_train2 = coerceDf(clone_and_drop(X_train, ignore_cols))    
   X_test2 = coerceDf(clone_and_drop(X_test, ignore_cols))
 
   y = [check_eq(3)(yval) for yval in y_train]
-  model = build_model(y, X_train2)
+  features = featureSelect(y, X_train2)
+  model = build_model(y, X_train2[features])
     
   count = len(data[target_col])
 
   all_predictions = []
-  predictions = model.predict(X_test2)
+  predictions = model.predict(X_test2[features])
   base_count = sum([check_eq(3)(yval) for yval in data[target_col]])
   baseline = base_count * 1.0 / count
   y = [check_eq(3)(yval) for yval in y_test]
   validate(3, y, predictions, baseline, compute_auc=True)
   print model.summary()
   print np.exp(model.params)
-  print confusion_matrix(y, [prediction > .47 for prediction in team_predictions])
+  print confusion_matrix(y, [prediction > .50 for prediction in predictions])
+  print zip(X_train['team_name'],X_train['op_team_name'], X_train['matchid'], X_train['is_home'],  predictions)
+
 
 def prepare_data(data):
   data = data.copy()

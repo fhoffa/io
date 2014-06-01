@@ -3,7 +3,7 @@ from pandas.io import gbq
 touch_table = 'cloude-sandbox:toque.touches'
 
 # Number of games to look at history from:
-history_size = 10
+history_size = 8 
 
 # Event type ids:
 pass_id = 1
@@ -26,6 +26,17 @@ GROUP BY matchid, teamid
 """ % {'touch_table': touch_table,
        'goal': goal_id, 
        'own_goal': own_goal_qualifier_id}
+
+pass_stats = """
+SELECT matchid, teamid, SUM(pass_80) as pass_80, SUM(pass_70) as pass_70
+FROM (
+   SELECT matchid, teamid, outcomeid, 
+   if (x > 80 and outcomeid = 1, 1, 0) as pass_80,
+   if (x > 70 and outcomeid = 1, 1, 0) as pass_70 
+  FROM [%(touch_table)s] WHERE typeid = %(pass)s)
+GROUP BY matchid, teamid
+""" % {'touch_table' : touch_table,
+       'pass': pass_id}
 
 own_goal_credit_subquery = """
 SELECT games.matchid as matchid, 
@@ -81,7 +92,6 @@ goals.matchid = cr.matchid and goals.teamid = cr.credit_team
 LEFT OUTER JOIN (%s) de on 
 goals.matchid = de.matchid and goals.teamid = de.deduct_team
 )
---ORDER BY matchid, teamid
 """ % (raw_goal_by_game_and_team_subquery, own_goal_credit_subquery, own_goal_credit_subquery)
 
 match_history = """
@@ -104,7 +114,7 @@ m1.timestamp >= h.tenth_last_match_timestamp AND
 m1.timestamp <= h.last_match_timestamp 
 
 """ % {'history_size': history_size, 
-       'match_goals': match_goals}
+       'match_goals': 'SELECT * FROM [temp.match_goals_table]'}
 
 team_game_summary = """
 SELECT 
@@ -117,9 +127,12 @@ t.corners as corners,
 t.fouls as fouls,
 t.shots as shots,
 t.cards as cards,
+p.pass_80 as pass_80,
+p.pass_70 as pass_70,
 TIMESTAMP_TO_MSEC(t.timestamp) as timestamp,
 g.goals as goals,
 h.is_home as is_home,
+h.team_name as team_name,
 FROM (
  SELECT matchid, teamid,
       sum(pass) as passes,
@@ -147,21 +160,26 @@ FROM (
 LEFT OUTER JOIN (%(match_goals)s) as g
 ON t.matchid = g.matchid and t.teamid = g.teamid
 JOIN
-(SELECT * FROM
+(%(pass_stats)s) p
+ON
+t.matchid = p.matchid and t.teamid = p.teamid
+JOIN
+(SELECT * FROM 
 (SELECT INTEGER(SUBSTR(hometeam_id, 2)) teamid, hometeam_name team_name, STRING(gameid) matchid, 1 is_home
 FROM [toque.matches]),
 (SELECT INTEGER(SUBSTR(awayteam_id, 2)) teamid, awayteam_name team_name, STRING(gameid) matchid, 0 is_home
 FROM [toque.matches])
 ) h
 ON t.matchid = h.matchid AND t.teamid = h.teamid
-ORDER BY matchid, is_home
+-- ORDER BY matchid, is_home
 """ % {'pass': pass_id,
        'foul': foul_id,
        'corner': corner_id,
        'half': half_id,
        'shots': ','.join([str(id) for id in shot_ids]),
        'card': card_id,
-       'match_goals': match_goals}
+       'pass_stats': pass_stats,
+       'match_goals': "SELECT * FROM [temp.match_goals_table]"}
 # print team_game_summary
 
 team_game_op_summary = """
@@ -176,6 +194,9 @@ SELECT cur.matchid as matchid,
   cur.goals as goals,
   cur.shots as shots,
   cur.is_home as is_home,
+  cur.team_name as team_name,
+  cur.pass_80 as pass_80,
+  cur.pass_70 as pass_70,
   
   opp.teamid as op_teamid,
   opp.passes as op_passes,
@@ -186,6 +207,13 @@ SELECT cur.matchid as matchid,
   opp.cards as op_cards, 
   opp.goals as op_goals,
   opp.shots as op_shots,
+  opp.team_name as op_team_name,
+  opp.pass_80 as op_pass_80,
+  opp.pass_70 as op_pass_70,
+
+  if (opp.shots > 0, cur.shots / opp.shots, cur.shots * 1.0) as shots_op_ratio,
+  if (opp.goals > 0, cur.goals / opp.goals, cur.goals * 1.0) as goals_op_ratio,
+  cur.pass_ratio / opp.pass_ratio as pass_op_ratio,
  
   if (cur.goals > opp.goals, 3,
     if (cur.goals == opp.goals, 1, 0)) as points,
@@ -208,9 +236,11 @@ pts.points as points,
 pts.goals as goals,
 pts.op_goals as op_goals,
 pts.is_home as is_home,
+pts.team_name as team_name,
+pts.op_team_name as op_team_name,
 
-/*
 summary.total_points as total_points,
+/*
 summary.total_goals as total_goals,
 summary.total_op_goals as total_op_goals,
 */
@@ -232,6 +262,10 @@ summary.op_away_passes as op_away_passes,
 summary.op_away_goals as op_away_goals,
 summary.op_away_shots as op_away_shots,
 
+summary.pass_70 as pass_70,
+summary.pass_80 as pass_80,
+summary.op_pass_70 as op_pass_70,
+summary.op_pass_80 as op_pass_80,
 summary.passes as passes,
 summary.bad_passes as bad_passes,
 summary.pass_ratio as pass_ratio,
@@ -246,6 +280,10 @@ summary.op_corners as op_corners,
 summary.op_fouls as op_fouls,
 summary.op_cards as op_cards,
 summary.op_shots as op_shots,
+
+summary.goals_op_ratio as goals_op_ratio,
+summary.shots_op_ratio as shots_op_ratio,
+summary.pass_op_ratio as pass_op_ratio,
 
 FROM (
 SELECT hist.matchid as matchid,
@@ -266,6 +304,10 @@ SELECT hist.matchid as matchid,
   SUM(IF(games.is_home == 0, games.op_goals, 0)) as op_away_goals,
   SUM(IF(games.is_home == 0, games.op_shots, 0)) as op_away_shots,
 
+  AVG(games.pass_70) as pass_70, 
+  AVG(games.pass_80) as pass_80, 
+  AVG(games.op_pass_70) as op_pass_70, 
+  AVG(games.op_pass_80) as op_pass_80, 
   AVG(games.passes) as passes, 
   AVG(games.bad_passes) as bad_passes, 
   AVG(games.pass_ratio) as pass_ratio,
@@ -273,6 +315,7 @@ SELECT hist.matchid as matchid,
   AVG(games.fouls) as fouls,
   AVG(games.cards) as cards, 
   SUM(games.goals) as total_goals, 
+  SUM(games.points) as total_points, 
   AVG(games.shots) as shots,
   AVG(games.op_passes) as op_passes, 
   AVG(games.op_bad_passes) as op_bad_passes, 
@@ -281,7 +324,9 @@ SELECT hist.matchid as matchid,
   AVG(games.op_cards) as op_cards,   
   AVG(games.op_shots) as op_shots, 
   SUM(games.op_goals) as total_op_goals, 
-  SUM(games.points) as total_points,  
+  AVG(games.goals_op_ratio) as goals_op_ratio,
+  AVG(games.shots_op_ratio) as shots_op_ratio,
+  AVG(games.pass_op_ratio) as pass_op_ratio,
   
 FROM (%(match_history)s)  hist
 JOIN (%(team_game_op_summary)s) games
@@ -292,7 +337,7 @@ GROUP BY matchid, teamid
 JOIN (%(team_game_op_summary)s) pts on summary.matchid = pts.matchid
 and summary.teamid = pts.teamid
 WHERE summary.matchid <> '442291'
-ORDER BY matchid, is_home
+ORDER BY matchid, is_home DESC
 """ % {'team_game_op_summary': team_game_op_summary,
        'match_history': match_history}
 
