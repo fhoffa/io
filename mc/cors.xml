@@ -1,0 +1,14 @@
+<?xml version="1.0" ?>
+<CorsConfig>
+    <Cors>
+        <Origins>
+            <Origin>*</Origin>
+        </Origins>
+        <Methods>
+            <Method>GET</Method>
+        </Methods>
+        <ResponseHeaders>
+            <ResponseHeader>Content-Type</ResponseHeader>
+        </ResponseHeaders>
+    </Cors>
+</CorsConfig>
