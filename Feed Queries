@@ -1,0 +1,3 @@
+/* Ingested Leagues by Year */
+SELECT  competitionname, seasonid, Count(*) as match_count FROM [toque.matches] 
+GROUP BY competitionid, competitionname, seasonid
