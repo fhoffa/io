@@ -3,7 +3,7 @@ from pandas.io import gbq
 touch_table = 'cloude-sandbox:toque.touches'
 
 # Number of games to look at history from:
-history_size = 8 
+history_size = 10 
 
 # Event type ids:
 pass_id = 1
@@ -17,6 +17,30 @@ game_id = 34
 
 # Qualifiers
 own_goal_qualifier_id = 28
+
+expected_goals_match = """
+SELECT matchid, teamid,
+  COUNT(eventid) as sot,
+  SUM(typeid = 16) as goals,
+  AVG(dist) as avgdist,
+  sum(pG) as xG
+FROM (SELECT *, 
+  IF(dist = 1, 1, 1.132464 - 0.303866* LN(dist)) as pG
+FROM (SELECT matchid, teamid, playerid, eventid, typeid, x, y,
+      ROUND(SQRT(POW((100-x),2) + POW((50-y),2))) as dist,
+      IF(typeid = 16,1,0) as goal
+FROM (SELECT matchid, teamid, playerid, eventid, typeid, x, y,
+    SUM(qualifiers.type = 82) WITHIN RECORD AS blck,
+    SUM(qualifiers.type IN (26,9)) WITHIN RECORD AS penfk,
+    SUM(qualifiers.type = 28) WITHIN RECORD AS og,
+   FROM [%(touch_table)s] 
+   WHERE typeid IN (14, 15,16))
+WHERE blck = 0 AND og = 0 AND penfk = 0)
+WHERE dist < 40)
+GROUP BY matchid, teamid
+ORDER BY matchid, teamid
+   """ % {'touch_table': touch_table}
+
 
 own_goals_by_team_subquery = """
 SELECT matchid, teamid, count(*) as own_goals
@@ -133,6 +157,8 @@ TIMESTAMP_TO_MSEC(t.timestamp) as timestamp,
 g.goals as goals,
 h.is_home as is_home,
 h.team_name as team_name,
+if (x.xG is not null, x.xG, 0.0) as expected_goals,
+if (x.sot is not null, x.xG, 0.0) as on_target,
 FROM (
  SELECT matchid, teamid,
       sum(pass) as passes,
@@ -171,6 +197,8 @@ FROM [toque.matches]),
 FROM [toque.matches])
 ) h
 ON t.matchid = h.matchid AND t.teamid = h.teamid
+LEFT OUTER JOIN (%(expected_goals)s) x
+ON t.matchid = x.matchid AND t.teamid = x.teamid
 -- ORDER BY matchid, is_home
 """ % {'pass': pass_id,
        'foul': foul_id,
@@ -179,6 +207,7 @@ ON t.matchid = h.matchid AND t.teamid = h.teamid
        'shots': ','.join([str(id) for id in shot_ids]),
        'card': card_id,
        'pass_stats': pass_stats,
+       'expected_goals': expected_goals_match,
        'match_goals': "SELECT * FROM [temp.match_goals_table]"}
 # print team_game_summary
 
@@ -197,6 +226,8 @@ SELECT cur.matchid as matchid,
   cur.team_name as team_name,
   cur.pass_80 as pass_80,
   cur.pass_70 as pass_70,
+  cur.expected_goals as expected_goals,
+  cur.on_target as on_target,
   
   opp.teamid as op_teamid,
   opp.passes as op_passes,
@@ -210,6 +241,8 @@ SELECT cur.matchid as matchid,
   opp.team_name as op_team_name,
   opp.pass_80 as op_pass_80,
   opp.pass_70 as op_pass_70,
+  opp.expected_goals as op_expected_goals,
+  opp.on_target as op_on_target,
 
   if (opp.shots > 0, cur.shots / opp.shots, cur.shots * 1.0) as shots_op_ratio,
   if (opp.goals > 0, cur.goals / opp.goals, cur.goals * 1.0) as goals_op_ratio,
@@ -266,6 +299,8 @@ summary.pass_70 as pass_70,
 summary.pass_80 as pass_80,
 summary.op_pass_70 as op_pass_70,
 summary.op_pass_80 as op_pass_80,
+summary.expected_goals as expected_goals,
+summary.op_expected_goals as op_expected_goals,
 summary.passes as passes,
 summary.bad_passes as bad_passes,
 summary.pass_ratio as pass_ratio,
@@ -308,6 +343,8 @@ SELECT hist.matchid as matchid,
   AVG(games.pass_80) as pass_80, 
   AVG(games.op_pass_70) as op_pass_70, 
   AVG(games.op_pass_80) as op_pass_80, 
+  AVG(games.expected_goals) as expected_goals, 
+  AVG(games.op_expected_goals) as op_expected_goals, 
   AVG(games.passes) as passes, 
   AVG(games.bad_passes) as bad_passes, 
   AVG(games.pass_ratio) as pass_ratio,

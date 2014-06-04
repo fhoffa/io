@@ -3,8 +3,10 @@ import pandas as pd
 from pandas.io import gbq
 import pylab as pl
 import random
+import scipy.cluster
 from sklearn import cross_validation
 from sklearn.metrics import confusion_matrix
+from sklearn.linear_model import LogisticRegression
 import statsmodels.api as sm
 
 import features
@@ -118,6 +120,35 @@ def drop_unbalanced_matches(data):
     while len(keep) < len(data): keep.append(False)
     return data[keep]
 
+def splice_target_col(col):
+  """ Swap the even numered rows """
+  for ii in xrange(0, len(col), 2):
+    val = col[ii]
+    col[ii] -= col[ii + 1]
+    col[ii+1] -= val
+  return col
+
+def splice_col(col):
+  """ Swap the even numered rows """
+  col = pd.np.array(col)
+  for ii in xrange(0, len(col), 2):
+    val = col[ii]
+    col[ii] = col[ii + 1]
+    col[ii+1] = val
+  return col
+
+def splice(data):
+  """ Splice both rows representing a game into a single one. """
+  data = data.copy()
+  opp = data.copy()
+  opp_cols = ['opp_%s' % (col,) for col in opp.columns]
+  opp.columns = opp_cols
+  opp = opp.apply(splice_col)
+  del opp['opp_intercept']
+  del opp['opp_is_home']
+  
+  return data.join(opp)
+
 def split(data, target_col):
     train_vec = []
     while len(train_vec) < len(data):
@@ -133,7 +164,7 @@ def split(data, target_col):
     if len(test) % 2 != 0:
         raise "Unexpected test length"
     return (train, test)
-    
+
 def extract_target(data, target_col):
     # Todo... use a slice rather than a copy
     y = data[target_col]
@@ -163,7 +194,7 @@ def featureSelect(y, X):
 
 def build_model(y, X):
   logit = sm.Logit(y, X)
-  return logit.fit(maxiter=1024)
+  return logit.fit_regularized(maxiter=1024, alpha=2.0)
 
 def classify(probabilities, proportions, levels=None):
   if not levels: levels = [False, True]
@@ -254,7 +285,20 @@ def validate(k, y, predictions, baseline, compute_auc=False):
 def coerceTypes(vals):
     first_type = None
     return [1.0 * val for val in vals]
-def coerceDf(df): return df.apply(coerceTypes)
+
+def coerceDf(df): return whiten(df.apply(coerceTypes))
+
+def whiten_col(col):
+  std = np.std(col)
+  mean = np.mean(col)
+  if abs(std) > 0.01:
+    return [(val - mean)/std for val in col]
+  else:
+    return col
+
+  
+def whiten(df):
+   return df.apply(whiten_col)
 
 def clone_and_drop(data, drop_cols):
     clone = data.copy()
@@ -432,8 +476,8 @@ def runGameNoDraw(data, ignore_cols, target_col):
   # test = test.loc[test[target_col] <> 1]
   (y_test, X_test) = extract_target(test, target_col)
   (y_train, X_train) = extract_target(train, target_col)
-  X_train2 = coerceDf(clone_and_drop(X_train, ignore_cols))    
-  X_test2 = coerceDf(clone_and_drop(X_test, ignore_cols))
+  X_train2 = splice(coerceDf(clone_and_drop(X_train, ignore_cols))) 
+  X_test2 = splice(coerceDf(clone_and_drop(X_test, ignore_cols)))
 
   (param, test_f) = (3, check_eq(3)) 
   y = [test_f(yval) for yval in y_train]
@@ -489,8 +533,11 @@ def runSimple(data, ignore_cols):
   print test.std()
   (y_test, X_test) = extract_target(test, target_col)
   (y_train, X_train) = extract_target(train, target_col)
-  X_train2 = coerceDf(clone_and_drop(X_train, ignore_cols))    
-  X_test2 = coerceDf(clone_and_drop(X_test, ignore_cols))
+  X_train2 = splice(coerceDf(clone_and_drop(X_train, ignore_cols)))   
+  X_test2 = splice(coerceDf(clone_and_drop(X_test, ignore_cols)))
+
+  #print X_train2.describe()
+  #print X_train2.head()
 
   y = [check_eq(3)(yval) for yval in y_train]
   features = featureSelect(y, X_train2)
@@ -505,9 +552,10 @@ def runSimple(data, ignore_cols):
   y = [check_eq(3)(yval) for yval in y_test]
   validate(3, y, predictions, baseline, compute_auc=True)
   print model.summary()
-  print np.exp(model.params)
+  # print np.exp(model.params)
   print confusion_matrix(y, [prediction > .50 for prediction in predictions])
-  print zip(X_train['team_name'],X_train['op_team_name'], X_train['matchid'], X_train['is_home'],  predictions)
+  print zip(X_train['team_name'],X_train['op_team_name'], X_train['matchid'], 
+            predictions, data[target_col'])
 
 
 def prepare_data(data):
