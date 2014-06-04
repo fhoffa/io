@@ -555,7 +555,7 @@ def runSimple(data, ignore_cols):
   # print np.exp(model.params)
   print confusion_matrix(y, [prediction > .50 for prediction in predictions])
   print zip(X_train['team_name'],X_train['op_team_name'], X_train['matchid'], 
-            predictions, data[target_col'])
+            predictions, data[target_col])
 
 
 def prepare_data(data):
