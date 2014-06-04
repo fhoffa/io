@@ -1,5 +1,21 @@
 """
     Predicts soccer outcomes using logistic regression.
+    How to run:
+import features
+
+# Read the features from bigquery.
+data = features.get_features()
+
+not_train_cols = features.get_non_feature_columns() 
+
+# There are three different ways of running the prediction. 
+# The simplest is:
+world_cup.runSimple(data, not_train_cols)
+
+# The best (currently) is:
+world_cup.runGameNoDraw(data, not_train_cols)
+
+# world_cup.runTeam(data, not_train_cols)
 """
 
 import numpy as np
@@ -56,10 +72,13 @@ def teamPredict(all_predictions, cnt):
            predictions.append(0)
     return (predictions,probs)
         
-def runTeam(data, ignore_cols, target_col):
+# This model doesn't seem to work as well as the runGameNoDraw version.
+# Use it instead.
+def runTeam(data, ignore_cols, target_col='goals'):
   """ Runs a goal-based prediciton that predicts the probability
       distribution for goals scored by each team, then predicts the
       winner based on this. """
+  data = prepareData(data.copy())
   (train, test) = split(data, target_col)
   (y_test, X_test) = extractTarget(test, target_col)
   (y_train, X_train) = extractTarget(train, target_col)
@@ -81,7 +100,7 @@ def runTeam(data, ignore_cols, target_col):
 
   all_predictions = []
   for (param, test_f, model, features) in models:
-    predictions = model.predict(X_test2[features])
+    predictions = predictModel(model, X_test2[features])
     base_count = sum([test_f(yval) for yval in data[target_col]])
     baseline = base_count * 1.0 / count
     y = [test_f(yval) for yval in y_test]
@@ -186,7 +205,7 @@ def buildModel(y, X):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.Logit(y, X)
-  return logit.fit_regularized(maxiter=1024, alpha=2.0)
+  return logit.fit_regularized(maxiter=1024, alpha=4.0)
 
 def classify(probabilities, proportions, levels=None):
   """ Given predicted probabilities and a vector of proportions,
@@ -385,7 +404,7 @@ def teamGamePredictNoDraw(all_predictions, cnt):
     predictions.append(dW)
   return predictions
 
-def runGameNoDraw(data, ignore_cols, target_col):
+def runGameNoDraw(data, ignore_cols, target_col='points'):
   """ Builds and tests a model that:
       1. Given an input dataframe that has:
          <<Game a, Home team, Features>,
@@ -407,6 +426,7 @@ def runGameNoDraw(data, ignore_cols, target_col):
          final 30% as losses.      
   """
   
+  data = prepareData(data)
   (train, test) = split(data, target_col)
   # Drop draws in the training set; they're not strong signals, so
   # we don't want to train on them.
@@ -426,7 +446,7 @@ def runGameNoDraw(data, ignore_cols, target_col):
   count = len(data[target_col])
 
   all_predictions = []
-  predictions = model.predict(X_test2[features])
+  predictions = predictModel(model, X_test2[features])
   base_count = sum([test_f(yval) for yval in data[target_col]])
   baseline = base_count * 1.0 / count
   print "Count: %d / Baseline %f" % (base_count, baseline)
@@ -457,20 +477,24 @@ def runGameNoDraw(data, ignore_cols, target_col):
            lose_count)
   print "W/L/D %d/%d/%s" % (win_count, lose_count, draw_count)
   print zip(X_train['team_name'],X_train['op_team_name'],
-            X_train['matchid'], predicted, y)
+            X_train['matchid'], predicted, test_team_results)
   zips = zip(predicted, test_team_results)
   correct = sum([int(pred) == int(res) for (pred, res) in zips])
   print confusion_matrix(test_team_results, predicted)
   print "Pct correct = %d/%d=%g" % (
       correct, len(zips), correct * 1.0 / len(zips))
 
+def predictModel(model, X_test):
+  X_test = X_test.copy()
+  X_test['intercept'] = 1.0
+  return model.predict(X_test)
+
 def runSimple(data, ignore_cols):
   """ Runs a simple predictor that will predict if we expect a team to win. """
     
+  data = prepareData(data)
   target_col = 'points'
   (train, test) = split(data, target_col)
-  # print  test.describe()
-  # print test.std()
   (y_test, X_test) = extractTarget(test, target_col)
   (y_train, X_train) = extractTarget(train, target_col)
   X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols)))   
@@ -483,7 +507,7 @@ def runSimple(data, ignore_cols):
   count = len(data[target_col])
 
   all_predictions = []
-  predictions = model.predict(X_test2[features])
+  predictions = predictModel(model, X_test2[features])
   base_count = sum([check_eq(3)(yval) for yval in data[target_col]])
   baseline = base_count * 1.0 / count
   y = [check_eq(3)(yval) for yval in y_test]
