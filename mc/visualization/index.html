@@ -5,6 +5,28 @@
 <script src="js/json2.js"></script>
 <script src="js/jquery.min.js"></script>
 <script src="js/simulation.js"></script>
+<style type="text/css">
+.xaxis path,
+.xaxis line {
+  fill: none;
+  stroke: black;
+  shape-rendering: crispEdges;
+}
+.xaxis text {
+  font-family: sans-serif;
+  font-size: 11px;
+}
+.yaxis path,
+.yaxis line {
+  fill: none;
+  stroke: black;
+  shape-rendering: crispEdges;
+}
+.yaxis text {
+  font-family: sans-serif;
+  font-size: 11px;
+}
+</style>
 
 <script>
 window.onload = function() {
@@ -384,34 +406,62 @@ window.onload = function() {
 
   // STATE
 
-  // Fetch generic player data
-  var goalkeeper = null;
-  var defender = null;
-  var midfielder = null;
-  var forward = null;
+  var goalkeeper0 = null;
+  var defender0 = null;
+  var midfielder0 = null;
+  var forward0 = null;
   $.ajax({
     async: false,
     cache: false,
-    url: 'http://storage.googleapis.com/toque-demo/generic-goalkeeper.json',
-    success: function(player) { goalkeeper = JSON.parse(player); }
+    url: 'http://storage.googleapis.com/toque-demo/team-35-goalkeeper.json',
+    success: function(player) { goalkeeper0 = JSON.parse(player); }
   });
   $.ajax({
     async: false,
     cache: false,
-    url: 'http://storage.googleapis.com/toque-demo/generic-defender.json',
-    success: function(player) { defender = JSON.parse(player); }
+    url: 'http://storage.googleapis.com/toque-demo/team-35-defender.json',
+    success: function(player) { defender0 = JSON.parse(player); }
   });
   $.ajax({
     async: false,
     cache: false,
-    url: 'http://storage.googleapis.com/toque-demo/generic-midfielder.json',
-    success: function(player) { midfielder = JSON.parse(player); }
+    url: 'http://storage.googleapis.com/toque-demo/team-35-midfielder.json',
+    success: function(player) { midfielder0 = JSON.parse(player); }
   });
   $.ajax({
     async: false,
     cache: false,
-    url: 'http://storage.googleapis.com/toque-demo/generic-forward.json',
-    success: function(player) { forward = JSON.parse(player); }
+    url: 'http://storage.googleapis.com/toque-demo/team-35-forward.json',
+    success: function(player) { forward0 = JSON.parse(player); }
+  });
+
+  var goalkeeper1 = null;
+  var defender1 = null;
+  var midfielder1 = null;
+  var forward1 = null;
+  $.ajax({
+    async: false,
+    cache: false,
+    url: 'http://storage.googleapis.com/toque-demo/team-20-goalkeeper.json',
+    success: function(player) { goalkeeper1 = JSON.parse(player); }
+  });
+  $.ajax({
+    async: false,
+    cache: false,
+    url: 'http://storage.googleapis.com/toque-demo/team-20-defender.json',
+    success: function(player) { defender1 = JSON.parse(player); }
+  });
+  $.ajax({
+    async: false,
+    cache: false,
+    url: 'http://storage.googleapis.com/toque-demo/team-20-midfielder.json',
+    success: function(player) { midfielder1 = JSON.parse(player); }
+  });
+  $.ajax({
+    async: false,
+    cache: false,
+    url: 'http://storage.googleapis.com/toque-demo/team-20-forward.json',
+    success: function(player) { forward1 = JSON.parse(player); }
   });
 
   function clone(o) {
@@ -422,10 +472,16 @@ window.onload = function() {
     return r;
   }
 
+  /* Generic Teams
   // Select roster
   var state = {
     team: [[clone(goalkeeper), clone(defender), clone(defender), clone(defender), clone(midfielder), clone(midfielder), clone(midfielder), clone(forward), clone(forward), clone(forward)],
            [clone(goalkeeper), clone(defender), clone(defender), clone(defender), clone(midfielder), clone(midfielder), clone(midfielder), clone(forward), clone(forward), clone(forward)]]
+  };
+  */
+  var state = {
+    team: [[clone(goalkeeper0), clone(defender0), clone(defender0), clone(defender0), clone(midfielder0), clone(midfielder0), clone(midfielder0), clone(forward0), clone(forward0), clone(forward0)],
+           [clone(goalkeeper1), clone(defender1), clone(defender1), clone(defender1), clone(midfielder1), clone(midfielder1), clone(midfielder1), clone(forward1), clone(forward1), clone(forward1)]]
   };
 
   simulate({
@@ -488,9 +544,9 @@ window.onload = function() {
    <td align="center" colspan="3">
      <table>
        <tr>
-         <td valign="middle" width="35%"><div id="goal-scatter-plot" style="margin:15px;"><svg style='width:400px;height:260px'></svg></div></td>
+         <td valign="middle" width="35%"><div id="goal-scatter-plot" style="margin:15px;"><svg style='width:400px;height:260px'></svg></div><center><b>Red Score vs. Blue Score</b></center></td>
          <td></td>
-         <td valign="middle" width="35%"><div id="goal-distribution-graph" style="margin:15px;"><svg style='width:400px;height:260px'></svg></div></td>
+         <td valign="middle" width="35%"><div id="goal-distribution-graph" style="margin:15px;"><svg style='width:400px;height:260px'></svg></div><center><b>Goal Distribution</b></center></td>
        </tr>
      </table>
    </td>

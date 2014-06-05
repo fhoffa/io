@@ -12,9 +12,9 @@ var simulate = (function() {
 
   // HELPER FUNCTIONS
   // Pick a coordinate in the field (not right on the edge, or near it).
-  function gen_x(third) { 
-    var w = 1/3;
-    return Math.random()*w + third*w;
+  function gen_x(section) { 
+    var w = 1/6;
+    return Math.random()*w + section*w;
   }
   // Pick a random y-coordinate
   function gen_y() {
@@ -34,7 +34,7 @@ var simulate = (function() {
   function is_goalkeeper(player) { return player.position == 'goalkeeper'; }
 
   // New game
-  // Updates x, y, third
+  // Updates x, y, section
   function clear(state) {
     reset(state);
     state.match++;
@@ -49,15 +49,15 @@ var simulate = (function() {
   }
  
   // Reset players to initial random position, change ownership
-  // Updates x, y, third
+  // Updates x, y, section
   function reset(state) {
     state.controlling_team = (state.controlling_team == 1) ? 0 : 1;
     for(var t = 0; t < state.team.length; t++) {
       for(var i = 0; i < state.team[t].length; i++) {
         // Assign locations
-        state.team[t].third = (Math.random() < 0.5 ? 0 : 1);
-        if (is_defender(state.team[t][i])) { state.team[t].third = 1; }
-        state.team[t][i].x = gen_x(state.team[t][i].third);
+        state.team[t][i].section = (Math.random() < 0.5 ? 0 : 1);
+        if (is_defender(state.team[t][i])) { state.team[t].section = 1; }
+        state.team[t][i].x = gen_x(state.team[t][i].section);
         state.team[t][i].y = gen_y();
         // Assign an owner
         if (state.controlling_team == t && is_forward(state.team[t][i])) { state.controlling_player = i; }
@@ -66,18 +66,18 @@ var simulate = (function() {
   }
 
   // Move players not in control of the ball to adjacent locations
-  // Updates x, y, third
+  // Updates x, y, section
   function move(state) {
     for(var t = 0; t < state.team.length; t++) {
       for(var i = 0; i < state.team[t].length; i++) {
         // Dont move the controlling player
         // if(t == state.controlling_team && i == state.controlling_player) { continue; }
-        // Randomly move players to a third based on the PDF
+        // Randomly move players to a section based on the PDF
         var n = Math.random();
         for(var k = state.team[t][i].move.length-1; k >= 0 ; k--) {
-	  if(n >= state.team[t][i].move[k] && (Math.max(k, state.team[t][i].third) - Math.min(k, state.team[t][i].third)) < 2) {
+	  if(n >= state.team[t][i].move[k] && (Math.max(k, state.team[t][i].section) - Math.min(k, state.team[t][i].section)) < 2) {
             // Assign new locations
-            state.team[t][i].third = k;
+            state.team[t][i].section = k;
             state.team[t][i].x = gen_x(k);
             state.team[t][i].y = gen_y();
             break;
@@ -88,12 +88,12 @@ var simulate = (function() {
   }
 
   // Pass control to a player on the same team
-  // Updates x, y, third
-  function pass(state, third) {
+  // Updates x, y, section
+  function pass(state, section) {
     var candidate = [];
     var t = state.controlling_team; 
     for(var i = 0; i < state.team[t].length; i++) {
-      if(i == state.controlling_player || state.team[t][i].third != third) { continue; }
+      if(i == state.controlling_player || state.team[t][i].section != section) { continue; }
       candidate.push(i);
     }
     shuffle(candidate);
@@ -103,12 +103,12 @@ var simulate = (function() {
   }
 
   // Pass control to a player on the opposite team
-  // Updates x, y, third
-  function pass_attempt(state, third) {
+  // Updates x, y, section
+  function pass_attempt(state, section) {
     var candidate = [];
     var t = (state.controlling_team == 1) ? 0 : 1; 
     for(var i = 0; i < state.team[t].length; i++) {
-      if(i == state.controlling_player || state.team[t][i].third != third) { continue; }
+      if(i == state.controlling_player || state.team[t][i].section != section) { continue; }
       candidate.push(i);
     }
     shuffle(candidate);
@@ -126,9 +126,15 @@ var simulate = (function() {
     pass_0,
     pass_1,
     pass_2,
+    pass_3,
+    pass_4,
+    pass_5,
     pass_attempt_0,
     pass_attempt_1,
     pass_attempt_2,
+    pass_attempt_3,
+    pass_attempt_4,
+    pass_attempt_5,
     own_goal,
     regular_goal,
     regular_attempt,
@@ -166,6 +172,18 @@ var simulate = (function() {
   function pass_2(state) {
     pass(state, 2);
   }
+ 
+  function pass_3(state) {
+    pass(state, 3);
+  }
+  
+  function pass_4(state) {
+    pass(state, 4);
+  }
+  
+  function pass_5(state) {
+    pass(state, 5);
+  }
   
   function pass_attempt_0(state) {
     pass_attempt(state, 0);
@@ -177,6 +195,18 @@ var simulate = (function() {
   
   function pass_attempt_2(state) {
     pass_attempt(state, 2);
+  }
+   
+  function pass_attempt_3(state) {
+    pass_attempt(state, 3);
+  }
+  
+  function pass_attempt_4(state) {
+    pass_attempt(state, 4);
+  }
+  
+  function pass_attempt_5(state) {
+    pass_attempt(state, 5);
   }
   
   function own_goal(state) {
@@ -262,12 +292,12 @@ var simulate = (function() {
       move(state);
       // Select a PDF
       var p = state.team[state.controlling_team][state.controlling_player].probability;
-      var third = state.team[state.controlling_team][state.controlling_player].third;
-      if(third <= p.length) {
+      var section = state.team[state.controlling_team][state.controlling_player].section;
+      if(section <= p.length) {
         // Choose an action
         var n = Math.random();
-        for(var k = p[third].length - 1; k >= 0; k--) {
-          if(n > p[third][k]) {
+        for(var k = p[section].length - 1; k >= 0; k--) {
+          if(n > p[section][k]) {
             // Apply the action to the state
             transitions[k](state);
             break;
