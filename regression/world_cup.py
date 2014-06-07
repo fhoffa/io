@@ -26,10 +26,12 @@ import random
 import scipy.cluster
 from sklearn import cross_validation
 from sklearn.metrics import confusion_matrix
+from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_curve
 from sklearn.linear_model import LogisticRegression
+
 import statsmodels.api as sm
 
-from roc import ROCData
 
 def teamPredict(all_predictions, cnt):
     """ Given an list of arrays of predictions, where each array is the prediction
@@ -72,14 +74,59 @@ def teamPredict(all_predictions, cnt):
            predictions.append(0)
     return (predictions,probs)
         
-# This model doesn't seem to work as well as the runGameNoDraw version.
-# Use it instead.
+def runTeamPoisson(data, ignore_cols):
+  """ Runs a goal-based prediciton that predicts the probability
+      distribution for goals scored by each team, then predicts the
+      winner based on this. """
+  data = splice(data)
+  # data['goal_diff'] = data['goals'].sub(data['opp_goals'])
+  # target_col = 'goal_diff'
+  target_col = 'goals'
+
+  ignore_cols += ['opp_%s' % (col,) for col in ignore_cols] 
+  
+  (train, test) = split(data)
+  data = prepareData(data.copy())
+  (train, test) = split(data)
+  (y_test, X_test) = extractTarget(test, target_col)
+  (y_train, X_train) = extractTarget(train, target_col)
+  
+  X_train2 = coerceDf(cloneAndDrop(X_train, ignore_cols))    
+  X_test2 = coerceDf(cloneAndDrop(X_test, ignore_cols))
+
+  model = buildModelPoisson(y_train, X_train2)
+  count = len(data[target_col])
+
+  predictions = predictModel(model, X_test2)
+  base_count = sum(yval > 1 for yval in data[target_col])
+  baseline = base_count * 1.0 / count
+  # validate(1, y_test, predictions, baseline, compute_auc=True)
+  test_team_results = teamTest(y_test)
+  all_team_results = teamTest(data[target_col])
+  team_predictions = teamTest(pd.Series(predictions))
+
+  validate('w', 
+           [int(pts) == 3 for pts in test_team_results], 
+           [1.0 if pts == 3 else 0.0 for pts in team_predictions],
+           sum([pts == 3 for pts in all_team_results]) * 1.0 / len(all_team_results))
+  validate('d', 
+           [int(pts) == 1 for pts in test_team_results], 
+           [1.0 if int(pts) == 1 else 0.0 for pts in team_predictions],
+           sum([int(pts) == 1 for pts in all_team_results]) * 1.0 / len(all_team_results))
+  validate('l', 
+           [int(pts) == 0 for pts in test_team_results], 
+           [1.0 if int(pts) == 0 else 0.0 for pts in team_predictions],
+           sum([int(pts) == 0 for pts in all_team_results]) * 1.0 / len(all_team_results))
+
+  print '%s: %s' % (target_col, model.summary())
+  print confusion_matrix(test_team_results, team_predictions)
+
 def runTeam(data, ignore_cols, target_col='goals'):
   """ Runs a goal-based prediciton that predicts the probability
       distribution for goals scored by each team, then predicts the
       winner based on this. """
   data = prepareData(data.copy())
-  (train, test) = split(data, target_col)
+  (train, test) = split(data)
   (y_test, X_test) = extractTarget(test, target_col)
   (y_train, X_train) = extractTarget(train, target_col)
   X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols)))    
@@ -168,7 +215,7 @@ def splice(data):
   
   return data.join(opp)
 
-def split(data, target_col, test_proportion=0.4):
+def split(data, test_proportion=0.4):
   """ Splits a dataframe into a training set and a test set.
       Must be careful because back-to-back rows are expeted to
       represent the same game, so they both must go in the 
@@ -200,6 +247,12 @@ def extractTarget(data, target_col):
 
 def check_ge(n): return lambda (x): int(x) >= int(n)
 def check_eq(n): return lambda (x): int(x) == int(n)
+
+def buildModelPoisson(y, X):
+  X = X.copy()
+  X['intercept'] = 1.0
+  logit = sm.Poisson(y, X)
+  return logit.fit_regularized(maxiter=1024, alpha=4.0)
 
 def buildModel(y, X):
   X = X.copy()
@@ -300,15 +353,18 @@ def validate(k, y, predictions, baseline=0.5, compute_auc=False):
   accuracy = (tp + tn) * 1.0 / len(y)
             
   if compute_auc:
-    tup_data = [(1 if y[i] else 0, predictions[i]) for i in range(len(y))]
-    auc = ROCData(tup_data).auc()
+    y_bool =  [True if yval else False for (yval,_) in zipped]
+    x = [xval for (_, xval) in zipped]
+    auc_value = roc_auc_score(y_bool, x)
+    fpr, tpr, thresholds = roc_curve(y_bool, x)
+    pl.plot(fpr, tpr, lw=1, label='ROC (area = %0.2f)' % (auc_value,))
   else:
-    auc = "NA"
+    auc_value = "NA"
   if fp + fn + tp + tn <> len(y):
     raise Exception("Unexpected confusion matrix")
 
   print "(%s) Base: %g Acc: %g P(1|t): %g P(0|f): %g Lift: %g Auc: %s" % (
-    k, baseline, accuracy, p1_t, p0_f, lift, auc)
+    k, baseline, accuracy, p1_t, p0_f, lift, auc_value)
  
   print "Fp/Fn/Tp/Tn p/n/c: %d/%d/%d/%d %d/%d/%d" % (
     fp, fn, tp, tn, p, n, len(y))
@@ -342,6 +398,7 @@ def cloneAndDrop(data, drop_cols):
   for col in drop_cols:
     if col in clone.columns:
       del clone[col]
+  # print "Remaining: %s" % (clone.columns,)
   return clone
 
 def normalize(vec):
@@ -427,7 +484,7 @@ def runGameNoDraw(data, ignore_cols, target_col='points'):
   """
   
   data = prepareData(data)
-  (train, test) = split(data, target_col)
+  (train, test) = split(data)
   # Drop draws in the training set; they're not strong signals, so
   # we don't want to train on them.
   train = train.loc[train[target_col] <> 1]
@@ -494,7 +551,7 @@ def runSimple(data, ignore_cols):
     
   data = prepareData(data)
   target_col = 'points'
-  (train, test) = split(data, target_col)
+  (train, test) = split(data)
   (y_test, X_test) = extractTarget(test, target_col)
   (y_train, X_train) = extractTarget(train, target_col)
   X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols)))   
