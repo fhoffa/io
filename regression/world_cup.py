@@ -261,11 +261,12 @@ def buildModelPoisson(y, X, acc=0.0000001):
   logit = sm.Poisson(y, X)
   return logit.fit_regularized(maxiter=10240, alpha=4.0, acc=acc)
 
+l1_alpha = 5.0
 def buildModel(y, X, acc=0.0000001):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.Logit(y, X)
-  return logit.fit_regularized(maxiter=10240, alpha=8.0, acc=acc)
+  return logit.fit_regularized(maxiter=10240, alpha=l1_alpha, acc=acc)
 
 def buildModelMn(y, X, acc=0.0000001):
   X = X.copy()
@@ -553,15 +554,15 @@ def runGameNoDraw(data, ignore_cols, target_col='points'):
   validate('w', 
            [pts == 3 for pts in test_team_results], 
            [1.0 if cl == 3 else 0.0 for cl in predicted],
-            win_count)
+            win_count * 1.0 / len(all_team_results))
   validate('d', 
            [int(pts) == 1 for pts in test_team_results], 
            [1.0 if cl == 1 else 0.0 for cl in predicted],
-           draw_count)
+            draw_count * 1.0 / len(all_team_results))
   validate('l', 
            [int(pts) == 0 for pts in test_team_results], 
            [1.0 if cl == 0 else 0.0 for cl in predicted],
-           lose_count)
+            lose_count * 1.0 / len(all_team_results))
   print "W/L/D %d/%d/%s" % (win_count, lose_count, draw_count)
   # X_train['predicted'] = predicted
   X_test_games = games(X_train)
@@ -667,13 +668,9 @@ def buildTeamMatrix(data, target_col):
 
   return pd.DataFrame(teams)
 
-def buildPower(data, col, coerce_fn):
-  (y, X) = extractTarget(data, col)
+def buildPower(X, y, coerce_fn):
   y = pd.Series([coerce_fn(val) for val in y])
-  if 'goal' in col:
-    model = buildModel(y, X, acc=0.00001)
-  else:
-    model = buildModel(y, X, acc=0.00001)
+  model = buildModel(y, X, acc=0.00001)
 
   params = np.exp(model.params)
   del params['intercept']
@@ -688,7 +685,8 @@ def addPower(data, cols):
   data = data.copy()
   for (col, coerce_fn, final_name) in cols:
     teams = buildTeamMatrix(data, col)
-    power = buildPower(teams, col, coerce_fn);
+    y, X = extractTarget(teams, col)
+    power = buildPower(X, y, coerce_fn);
     power_col = pd.Series(np.empty(len(data)))
     for index in xrange(len(data)):
       power_col[index] = power[str(data.iloc[index]['teamid'])]

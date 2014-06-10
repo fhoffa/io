@@ -3,7 +3,7 @@ from pandas.io import gbq
 touch_table = 'cloude-sandbox:toque.touches'
 
 # Number of games to look at history from:
-history_size = 10 
+history_size = 3 
 
 # Event type ids:
 pass_id = 1
@@ -157,6 +157,7 @@ TIMESTAMP_TO_MSEC(t.timestamp) as timestamp,
 g.goals as goals,
 h.is_home as is_home,
 h.team_name as team_name,
+h.competitionid as competitionid,
 if (x.xG is not null, x.xG, 0.0) as expected_goals,
 if (x.sot is not null, x.xG, 0.0) as on_target,
 FROM (
@@ -191,9 +192,9 @@ ON
 t.matchid = p.matchid and t.teamid = p.teamid
 JOIN
 (SELECT * FROM 
-(SELECT INTEGER(SUBSTR(hometeam_id, 2)) teamid, hometeam_name team_name, STRING(gameid) matchid, 1 is_home
+(SELECT INTEGER(SUBSTR(hometeam_id, 2)) teamid, competitionid, hometeam_name team_name, STRING(gameid) matchid, 1 is_home
 FROM [toque.matches]),
-(SELECT INTEGER(SUBSTR(awayteam_id, 2)) teamid, awayteam_name team_name, STRING(gameid) matchid, 0 is_home
+(SELECT INTEGER(SUBSTR(awayteam_id, 2)) teamid, competitionid, awayteam_name team_name, STRING(gameid) matchid, 0 is_home
 FROM [toque.matches])
 ) h
 ON t.matchid = h.matchid AND t.teamid = h.teamid
@@ -244,6 +245,8 @@ SELECT cur.matchid as matchid,
   opp.expected_goals as op_expected_goals,
   opp.on_target as op_on_target,
 
+  cur.competitionid as competitionid,
+
   if (opp.shots > 0, cur.shots / opp.shots, cur.shots * 1.0) as shots_op_ratio,
   if (opp.goals > 0, cur.goals / opp.goals, cur.goals * 1.0) as goals_op_ratio,
   cur.pass_ratio / opp.pass_ratio as pass_op_ratio,
@@ -278,15 +281,11 @@ summary.total_goals as total_goals,
 summary.total_op_goals as total_op_goals,
 */
 
+summary.competitionid as competitionid,
 summary.home_passes as home_passes,
 summary.home_goals as home_goals,
 summary.home_shots as home_shots,
 
-/*
-summary.away_passes as away_passes,
-summary.away_goals as away_goals,
-summary.away_shots as away_shots,
-*/
 summary.op_home_passes as op_home_passes,
 summary.op_home_goals as op_home_goals,
 summary.op_home_shots as op_home_shots,
