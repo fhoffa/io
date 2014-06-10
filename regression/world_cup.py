@@ -668,9 +668,9 @@ def buildTeamMatrix(data, target_col):
 
   return pd.DataFrame(teams)
 
-def buildPower(X, y, coerce_fn):
+def buildPower(X, y, coerce_fn, acc=0.0001):
   y = pd.Series([coerce_fn(val) for val in y])
-  model = buildModel(y, X, acc=0.00001)
+  model = buildModel(y, X, acc=acc)
 
   params = np.exp(model.params)
   del params['intercept']

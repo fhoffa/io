@@ -274,6 +274,7 @@ pts.op_goals as op_goals,
 pts.is_home as is_home,
 pts.team_name as team_name,
 pts.op_team_name as op_team_name,
+pts.competitionid as competitionid,
 
 summary.total_points as total_points,
 /*
@@ -281,7 +282,6 @@ summary.total_goals as total_goals,
 summary.total_op_goals as total_op_goals,
 */
 
-summary.competitionid as competitionid,
 summary.home_passes as home_passes,
 summary.home_goals as home_goals,
 summary.home_shots as home_shots,
