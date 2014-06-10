@@ -20,6 +20,7 @@ world_cup.runGameNoDraw(data, not_train_cols)
 """
 
 import numpy as np
+from numpy.linalg import LinAlgError
 import pandas as pd
 from pandas.io import gbq
 import pylab as pl
@@ -32,7 +33,6 @@ from sklearn.metrics import roc_curve
 from sklearn.linear_model import LogisticRegression
 
 import statsmodels.api as sm
-
 
 def teamPredict(all_predictions, cnt):
     """ Given an list of arrays of predictions, where each array is the prediction
@@ -261,7 +261,7 @@ def buildModelPoisson(y, X, acc=0.0000001):
   logit = sm.Poisson(y, X)
   return logit.fit_regularized(maxiter=10240, alpha=4.0, acc=acc)
 
-l1_alpha = 5.0
+l1_alpha = 10.0
 def buildModel(y, X, acc=0.0000001):
   X = X.copy()
   X['intercept'] = 1.0
@@ -272,7 +272,7 @@ def buildModelMn(y, X, acc=0.0000001):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.MNLogit(y, X)
-  return logit.fit_regularized(maxiter=10240, alpha=8.0, acc=acc)
+  return logit.fit_regularized(maxiter=10240, alpha=l1_alpha, acc=acc)
 
 def classify(probabilities, proportions, levels=None):
   """ Given predicted probabilities and a vector of proportions,
@@ -530,7 +530,7 @@ def runGameNoDraw(data, ignore_cols, target_col='points'):
   y = [test_f(yval) for yval in y_train]
   features = X_train2.columns
   model = buildModel(y, X_train2[features])
-  # print '%s: %s: %s' % (target_col, param, model.summary())
+  print '%s: %s: %s' % (target_col, param, model.summary())
     
   count = len(data[target_col])
 
@@ -672,25 +672,50 @@ def buildPower(X, y, coerce_fn, acc=0.0001):
   y = pd.Series([coerce_fn(val) for val in y])
   model = buildModel(y, X, acc=acc)
 
+  print model.summary()
   params = np.exp(model.params)
   del params['intercept']
   min_param = params.min()
   max_param = params.max()
   range = max_param - min_param
   params = params.sub(min_param)
-  params = params.div(max_param - min_param)
+  params = params.div(range)
   return params.to_dict()
 
 def addPower(data, cols):
   data = data.copy()
+  competitions = data['competitionid'].unique()
   for (col, coerce_fn, final_name) in cols:
-    teams = buildTeamMatrix(data, col)
-    y, X = extractTarget(teams, col)
-    power = buildPower(X, y, coerce_fn);
-    power_col = pd.Series(np.empty(len(data)))
+    power_col = pd.Series(np.zeros(len(data)))
+    power = {}
+    for competition in competitions:
+      acc = 0.00001
+      while True:
+        if acc > 1.0:
+          break;
+        competition_data = data[data['competitionid'] == competition]
+        try:
+          teams = buildTeamMatrix(competition_data, col)
+          y = teams[col]
+          del teams[col]
+          power.update(buildPower(teams, y, coerce_fn, acc));
+          break
+        except LinAlgError, err:
+          acc *= 5  
+          print 'Reducing accuracy for %s to %f due to error %s' % (competition, acc, err)
+
+      if acc > 1.0:
+        print "Skipping power ranking for competition %s column %s" % (
+          competition, final_name)
+        continue
     for index in xrange(len(data)):
-      power_col[index] = power[str(data.iloc[index]['teamid'])]
-    data['power_%s' % final_name] = power_col
+      teamid = str(data.iloc[index]['teamid'])
+      if not teamid in power:
+        print "Missing power data for %s" % teamid
+        power[teamid] = 0.5
+
+      power_col[index] = power[teamid]
+    data['power_%s' % (final_name)] = power_col
   return data
 
 def prepareData(data):

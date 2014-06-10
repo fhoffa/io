@@ -268,13 +268,13 @@ SELECT
 summary.matchid as matchid,
 pts.teamid as teamid,
 pts.op_teamid as op_teamid,
+pts.competitionid as competitionid,
 pts.points as points,
 pts.goals as goals,
 pts.op_goals as op_goals,
 pts.is_home as is_home,
 pts.team_name as team_name,
 pts.op_team_name as op_team_name,
-pts.competitionid as competitionid,
 
 summary.total_points as total_points,
 /*
@@ -381,7 +381,7 @@ def get_features():
   return gbq.read_gbq(history_query)
 
 def get_non_feature_columns():
-  return ['teamid', 'op_teamid', 'matchid',
+  return ['teamid', 'op_teamid', 'matchid', 'competitionid',
           'goals', 'op_goals', 'points', 'timestamp', 'team_name', 
           'op_team_name']
 
