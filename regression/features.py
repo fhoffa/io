@@ -381,3 +381,11 @@ ORDER BY matchid, is_home DESC
 def get_features():
   return gbq.read_gbq(history_query)
 
+def get_non_feature_columns():
+  return ['teamid', 'op_teamid', 'matchid',
+          'goals', 'op_goals', 'points', 'timestamp', 'team_name', 
+          'op_team_name']
+
+def get_feature_columns(all_cols):
+  return [col for col in all_cols if col not in get_non_feature_columns()]
+

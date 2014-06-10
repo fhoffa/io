@@ -1,5 +1,6 @@
 """
     Predicts soccer outcomes using logistic regression.
+
     How to run:
 import features
 
@@ -97,13 +98,19 @@ def runTeamPoisson(data, ignore_cols):
   model = buildModelPoisson(y_train, X_train2)
   count = len(data[target_col])
 
-  predictions = predictModel(model, X_test2)
+  predictions = _predictModel(model, X_test2)
   base_count = sum(yval > 1 for yval in data[target_col])
   baseline = base_count * 1.0 / count
   # validate(1, y_test, predictions, baseline, compute_auc=True)
   test_team_results = teamTest(y_test)
   all_team_results = teamTest(data[target_col])
   team_predictions = teamTest(pd.Series(predictions))
+  team_predictions_prob = teamTestProb(pd.Series(predictions))
+  validate('poisson', 
+           [int(pts) == 3 for pts in test_team_results], 
+           team_predictions_prob,
+           sum([pts == 3 for pts in all_team_results]) * 1.0 / len(all_team_results),
+           compute_auc=True)
 
   validate('w', 
            [int(pts) == 3 for pts in test_team_results], 
@@ -147,11 +154,11 @@ def runTeam(data, ignore_cols, target_col='goals'):
 
   all_predictions = []
   for (param, test_f, model, features) in models:
-    predictions = predictModel(model, X_test2[features])
+    predictions = _predictModel(model, X_test2[features])
     base_count = sum([test_f(yval) for yval in data[target_col]])
     baseline = base_count * 1.0 / count
     y = [test_f(yval) for yval in y_test]
-    validate(param, y, predictions, baseline, compute_auc=True)
+    validate('goals_%s' % (param,), y, predictions, baseline, compute_auc=True)
     all_predictions.append((param, predictions))
     print '%s: %s: %s' % (target_col, param, model.summary())
 
@@ -248,17 +255,23 @@ def extractTarget(data, target_col):
 def check_ge(n): return lambda (x): int(x) >= int(n)
 def check_eq(n): return lambda (x): int(x) == int(n)
 
-def buildModelPoisson(y, X):
+def buildModelPoisson(y, X, acc=0.0000001):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.Poisson(y, X)
-  return logit.fit_regularized(maxiter=1024, alpha=4.0)
+  return logit.fit_regularized(maxiter=10240, alpha=4.0, acc=acc)
 
-def buildModel(y, X):
+def buildModel(y, X, acc=0.0000001):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.Logit(y, X)
-  return logit.fit_regularized(maxiter=1024, alpha=4.0)
+  return logit.fit_regularized(maxiter=10240, alpha=8.0, acc=acc)
+
+def buildModelMn(y, X, acc=0.0000001):
+  X = X.copy()
+  X['intercept'] = 1.0
+  logit = sm.MNLogit(y, X)
+  return logit.fit_regularized(maxiter=10240, alpha=8.0, acc=acc)
 
 def classify(probabilities, proportions, levels=None):
   """ Given predicted probabilities and a vector of proportions,
@@ -357,13 +370,17 @@ def validate(k, y, predictions, baseline=0.5, compute_auc=False):
     x = [xval for (_, xval) in zipped]
     auc_value = roc_auc_score(y_bool, x)
     fpr, tpr, thresholds = roc_curve(y_bool, x)
-    pl.plot(fpr, tpr, lw=1, label='ROC (area = %0.2f)' % (auc_value,))
+    pl.plot(fpr, tpr, lw=1.5, label='ROC %s (area = %0.2f)' % (k, auc_value,))
+    pl.xlabel('False Positive Rate', fontsize=18)
+    pl.ylabel('True Positive Rate', fontsize=18)
+    pl.title('ROC curve', fontsize=18)
+    auc_value = '%0.03g' % auc_value
   else:
     auc_value = "NA"
   if fp + fn + tp + tn <> len(y):
     raise Exception("Unexpected confusion matrix")
 
-  print "(%s) Base: %g Acc: %g P(1|t): %g P(0|f): %g Lift: %g Auc: %s" % (
+  print "(%s) Base: %0.03g Acc: %0.03g P(1|t): %0.03g P(0|f): %0.03g\nLift: %0.03g Auc: %s" % (
     k, baseline, accuracy, p1_t, p0_f, lift, auc_value)
  
   print "Fp/Fn/Tp/Tn p/n/c: %d/%d/%d/%d %d/%d/%d" % (
@@ -376,11 +393,11 @@ def coerceTypes(vals):
   return [1.0 * val for val in vals]
 
 def coerceDf(df): 
-  """ Coerces a dataframe to all floats, and whitens the values. """
-  return whiten(df.apply(coerceTypes))
+  """ Coerces a dataframe to all floats, and standardizes the values. """
+  return standardize(df.apply(coerceTypes))
 
-def whitenCol(col):
-  """ Whitens a single column (subtracts mean and divides by std dev. """
+def standardizeCol(col):
+  """ Standardizes a single column (subtracts mean and divides by std dev). """
   std = np.std(col)
   mean = np.mean(col)
   if abs(std) > 0.001:
@@ -388,9 +405,9 @@ def whitenCol(col):
   else:
     return col
 
-def whiten(df):
-   """ Whitens a dataframe. All fields must be numeric. """
-   return df.apply(whitenCol)
+def standardize(df):
+   """ Standardizes a dataframe. All fields must be numeric. """
+   return df.apply(standardizeCol)
 
 def cloneAndDrop(data, drop_cols):
   """ Returns a copy of a dataframe that doesn't have certain columns. """
@@ -405,6 +422,11 @@ def normalize(vec):
     total = float(sum(vec))
     return [val / total for val in vec]
 
+def games(df):
+  """ Drops odd numbered rows in a column. This is used when we
+      have two rows representing a game, and we only need 1. """
+  return df[[idx % 2 == 0 for idx in xrange(len(df))]] 
+  
 def teamTest(y):
   """ Given a vector containing the number of goals scored in a game
       where y[k] (where k % 2 = 0) is the number of goals scored by
@@ -415,12 +437,21 @@ def teamTest(y):
   """ 
 
   results = []
-  for game in range(len(y)/2):
+  for game in xrange(len(y)/2):
     g0 = int(y.iloc[game * 2])
     g1 = int(y.iloc[game * 2 + 1])
     if g0 > g1: results.append(3)
     elif g0 == g1: results.append(1)
     else: results.append(0)
+  return results
+
+def teamTestProb(y):
+
+  results = []
+  for game in range(len(y)/2):
+    g0 = int(y.iloc[game * 2])
+    g1 = int(y.iloc[game * 2 + 1])
+    results.append(g0-g1)
   return results
 
 def checkData(data):
@@ -498,18 +529,17 @@ def runGameNoDraw(data, ignore_cols, target_col='points'):
   y = [test_f(yval) for yval in y_train]
   features = X_train2.columns
   model = buildModel(y, X_train2[features])
-  print '%s: %s: %s' % (target_col, param, model.summary())
+  # print '%s: %s: %s' % (target_col, param, model.summary())
     
   count = len(data[target_col])
 
-  all_predictions = []
-  predictions = predictModel(model, X_test2[features])
+  predictions = _predictModel(model, X_test2[features])
   base_count = sum([test_f(yval) for yval in data[target_col]])
   baseline = base_count * 1.0 / count
-  print "Count: %d / Baseline %f" % (base_count, baseline)
+  # print "Count: %d / Baseline %f" % (base_count, baseline)
 
   y = [test_f(yval) for yval in y_test]
-  validate(param, y, predictions, baseline, compute_auc=True)
+  validate('points_%s' % (param,), y, predictions, baseline, compute_auc=True)
     
   probabilities = teamGamePredictNoDraw(predictions, len(y_test))
   all_team_results = teamTest(data['points'])
@@ -533,18 +563,58 @@ def runGameNoDraw(data, ignore_cols, target_col='points'):
            [1.0 if cl == 0 else 0.0 for cl in predicted],
            lose_count)
   print "W/L/D %d/%d/%s" % (win_count, lose_count, draw_count)
-  print zip(X_train['team_name'],X_train['op_team_name'],
-            X_train['matchid'], predicted, test_team_results)
-  zips = zip(predicted, test_team_results)
-  correct = sum([int(pred) == int(res) for (pred, res) in zips])
-  print confusion_matrix(test_team_results, predicted)
-  print "Pct correct = %d/%d=%g" % (
-      correct, len(zips), correct * 1.0 / len(zips))
+  # X_train['predicted'] = predicted
+  X_test_games = games(X_train)
+  # zips = zip(predicted, test_team_results)
+  # correct = sum([int(pred) == int(res) for (pred, res) in zips])
+  # print confusion_matrix(test_team_results, predicted)
+  # print "Pct correct = %d/%d=%g" % (correct, len(zips), correct * 1.0 / len(zips))
+  return (X_test_games, predicted)
 
-def predictModel(model, X_test):
+def _predictModel(model, X_test):
   X_test = X_test.copy()
   X_test['intercept'] = 1.0
   return model.predict(X_test)
+
+def trainModel(data, ignore_cols):
+  # Validate the data
+  data = prepareData(data)
+  target_col = 'points'
+  (train, test) = split(data)
+  (y_test, X_test) = extractTarget(test, target_col)
+  (y_train, X_train) = extractTarget(train, target_col)
+  X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols)))   
+
+  y = [int(yval) == 3 for yval in y_train]
+  X_train2['intercept'] = 1.0
+  logit = sm.Logit(y, X_train2)
+  model = logit.fit_regularized(maxiter=10240, alpha=8.0) 
+  return (model, test)
+
+
+def predictModel(model, test, ignore_cols):
+  """ Runs a simple predictor that will predict if we expect a team to win. """
+    
+  X_test2 = splice(coerceDf(cloneAndDrop(test, ignore_cols)))
+  X_test2['intercept'] = 1.0
+  predicted =  model.predict(X_test2)
+  result = test.copy()
+  result['predicted'] = predicted
+  return result
+
+def validatePredictions(predictions, base_count):
+
+  count = len(data[target_col])
+
+  base_count = sum([check_eq(3)(yval) for yval in data[target_col]])
+  baseline = base_count * 1.0 / count
+  y = [check_eq(3)(yval) for yval in y_test]
+  validate(3, y, predictions, baseline, compute_auc=True)
+  print model.summary()
+  grounded_predictions = [prediction > 0.50 for prediction in predictions]
+  print confusion_matrix(y, grounded_predictions)
+  print zip(X_train['team_name'],X_train['op_team_name'], X_train['matchid'], 
+            grounded_predictions, data[target_col])
 
 def runSimple(data, ignore_cols):
   """ Runs a simple predictor that will predict if we expect a team to win. """
@@ -563,8 +633,7 @@ def runSimple(data, ignore_cols):
     
   count = len(data[target_col])
 
-  all_predictions = []
-  predictions = predictModel(model, X_test2[features])
+  predictions = _predictModel(model, X_test2[features])
   base_count = sum([check_eq(3)(yval) for yval in data[target_col]])
   baseline = base_count * 1.0 / count
   y = [check_eq(3)(yval) for yval in y_test]
@@ -572,8 +641,59 @@ def runSimple(data, ignore_cols):
   print model.summary()
   grounded_predictions = [prediction > 0.50 for prediction in predictions]
   print confusion_matrix(y, grounded_predictions)
-  print zip(X_train['team_name'],X_train['op_team_name'], X_train['matchid'], 
+  print zip(X_test['team_name'],X_test['op_team_name'], X_test['matchid'], 
             grounded_predictions, data[target_col])
+
+def buildTeamMatrix(data, target_col):
+  teams = {}
+  n = len(data) / 2
+  for teamid in data['teamid']:
+    teams[str(teamid)] = pd.Series(np.zeros(n))
+
+  result = pd.Series(np.empty(n))
+  teams[target_col] = result
+
+  for game in xrange(n):
+    home = data.iloc[game * 2]
+    away = data.iloc[game * 2 + 1]
+
+    home_id = str(home['teamid'])
+    away_id = str(away['teamid'])
+    points = home[target_col] - away[target_col]
+
+    teams[home_id][game] = 1.0
+    teams[away_id][game] = -1.0
+    result[game] = points
+
+  return pd.DataFrame(teams)
+
+def buildPower(data, col, coerce_fn):
+  (y, X) = extractTarget(data, col)
+  y = pd.Series([coerce_fn(val) for val in y])
+  if 'goal' in col:
+    model = buildModel(y, X, acc=0.00001)
+  else:
+    model = buildModel(y, X, acc=0.00001)
+
+  params = np.exp(model.params)
+  del params['intercept']
+  min_param = params.min()
+  max_param = params.max()
+  range = max_param - min_param
+  params = params.sub(min_param)
+  params = params.div(max_param - min_param)
+  return params.to_dict()
+
+def addPower(data, cols):
+  data = data.copy()
+  for (col, coerce_fn, final_name) in cols:
+    teams = buildTeamMatrix(data, col)
+    power = buildPower(teams, col, coerce_fn);
+    power_col = pd.Series(np.empty(len(data)))
+    for index in xrange(len(data)):
+      power_col[index] = power[str(data.iloc[index]['teamid'])]
+    data['power_%s' % final_name] = power_col
+  return data
 
 def prepareData(data):
   """ Drops all matches where we don't have data for both teams. """
