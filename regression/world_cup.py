@@ -261,18 +261,18 @@ def buildModelPoisson(y, X, acc=0.0000001):
   logit = sm.Poisson(y, X)
   return logit.fit_regularized(maxiter=10240, alpha=4.0, acc=acc)
 
-l1_alpha = 10.0
-def buildModel(y, X, acc=0.0000001):
+l1_alpha = 16.0
+def buildModel(y, X, acc=0.0000001, alpha=l1_alpha):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.Logit(y, X)
-  return logit.fit_regularized(maxiter=10240, alpha=l1_alpha, acc=acc)
+  return logit.fit_regularized(maxiter=10240, alpha=alpha, acc=acc)
 
-def buildModelMn(y, X, acc=0.0000001):
+def buildModelMn(y, X, acc=0.0000001, alpha=l1_alpha):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.MNLogit(y, X)
-  return logit.fit_regularized(maxiter=10240, alpha=l1_alpha, acc=acc)
+  return logit.fit_regularized(maxiter=10240, alpha=alpha, acc=acc)
 
 def classify(probabilities, proportions, levels=None):
   """ Given predicted probabilities and a vector of proportions,
@@ -402,7 +402,7 @@ def standardizeCol(col):
   std = np.std(col)
   mean = np.mean(col)
   if abs(std) > 0.001:
-    return [(val - mean)/std for val in col]
+    return col.apply(lambda val: (val - mean)/std)
   else:
     return col
 
@@ -670,17 +670,30 @@ def buildTeamMatrix(data, target_col):
 
 def buildPower(X, y, coerce_fn, acc=0.0001):
   y = pd.Series([coerce_fn(val) for val in y])
-  model = buildModel(y, X, acc=acc)
+  model = buildModel(y, X, acc=acc, alpha=1.0)
 
-  print model.summary()
+  # print model.summary()
   params = np.exp(model.params)
   del params['intercept']
-  min_param = params.min()
+  params = params[params <> 1.0]
   max_param = params.max()
+  min_param = params.min()
   range = max_param - min_param
+  if len(params) == 0 or range < 0.0001:
+    return None
+  
+  # return standardizeCol(params).to_dict()
   params = params.sub(min_param)
   params = params.div(range)
-  return params.to_dict()
+  qqs = np.percentile(params, [25, 50, 75])
+  def snap(val): 
+    for ii in xrange(len(qqs)):
+      if (qqs[ii] > val): return ii * 0.33
+    return 1.0
+    
+  return params.apply(snap).to_dict()
+  # return params.apply(lambda val: 0.0 if val < q1 else (.5 if val < q2 else 1.0)).to_dict()
+  # return params.to_dict()
 
 def addPower(data, cols):
   data = data.copy()
@@ -689,32 +702,43 @@ def addPower(data, cols):
     power_col = pd.Series(np.zeros(len(data)))
     power = {}
     for competition in competitions:
-      acc = 0.00001
+      acc = 0.000001
+      alpha = 10.0
+      competition_data = data[data['competitionid'] == competition]
+      competition_data = competition_data.iloc[:100]
       while True:
-        if acc > 1.0:
+        if alpha < 1.0:
           break;
-        competition_data = data[data['competitionid'] == competition]
         try:
           teams = buildTeamMatrix(competition_data, col)
           y = teams[col]
           del teams[col]
-          power.update(buildPower(teams, y, coerce_fn, acc));
-          break
+          competition_power = buildPower(teams, y, coerce_fn, acc)
+          if competition_power is None:
+            alpha /= 2
+            print 'Reducing alpha for %s to %f due lack of dynamic range' % (competition, alpha)
+          else:
+            power.update(competition_power)
+            break
         except LinAlgError, err:
-          acc *= 5  
-          print 'Reducing accuracy for %s to %f due to error %s' % (competition, acc, err)
+          alpha /= 2  
+          print 'Reducing alpha for %s to %f due to error %s' % (competition, alpha, err)
 
-      if acc > 1.0:
+      if alpha < 1.0:
         print "Skipping power ranking for competition %s column %s" % (
           competition, final_name)
         continue
+
+    names = {}
+    
     for index in xrange(len(data)):
       teamid = str(data.iloc[index]['teamid'])
       if not teamid in power:
         print "Missing power data for %s" % teamid
         power[teamid] = 0.5
-
+      names[data.iloc[index]['team_name']] = power[teamid]
       power_col[index] = power[teamid]
+    print ['%s: %0.03f' % (x[0], x[1]) for x in sorted(names.items(), key=(lambda x: x[1]))]
     data['power_%s' % (final_name)] = power_col
   return data
 
