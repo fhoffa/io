@@ -662,7 +662,8 @@ def buildTeamMatrix(data, target_col):
     away_id = str(away['teamid'])
     points = home[target_col] - away[target_col]
 
-    teams[home_id][game] = 1.0
+    # Discount home team's performance.
+    teams[home_id][game] = .75
     teams[away_id][game] = -1.0
     result[game] = points
 
@@ -705,7 +706,7 @@ def addPower(data, cols):
       acc = 0.000001
       alpha = 10.0
       competition_data = data[data['competitionid'] == competition]
-      competition_data = competition_data.iloc[:100]
+      # competition_data = competition_data.iloc[:100]
       while True:
         if alpha < 1.0:
           break;
