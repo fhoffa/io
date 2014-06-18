@@ -1,0 +1,5 @@
+
+create-summaries.sh - generates the summary data that is used to compute statistics
+create-position-probabilities.sh - generates the per/position aggregated statistics (to fallback on when we don't have enough player-specific data)
+create-player-probabilities.sh - generates the per/player aggregated statistics
+create-worldcup-player-probabilities.sh - generates the per/player aggregated statistics, using representative stand-ins for worldcup players
