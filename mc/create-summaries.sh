@@ -10,7 +10,7 @@ bq --project_id=$PROJECTID \
 
 # Query to generate a mapping of team/player/time -> position
 POSITION_SUMMARY_QUERY=`cat<<EOF
-SELECT matchid, FLOOR(TIMESTAMP_TO_MSEC(timestamp)/1000) AS second, periodid, teamid, playerid, LOWER(qualifiers.value) AS position 
+SELECT matchid, INTEGER(FLOOR(TIMESTAMP_TO_MSEC(timestamp)/1000)) AS second, periodid, teamid, playerid, LOWER(qualifiers.value) AS position 
   FROM [toque.touches] 
     WHERE qualifiers.type == 44 AND playerid != 0
       ORDER BY matchid, second, periodid
@@ -35,7 +35,7 @@ bq \
 
 # Query to generate a second-by-second play summay of the game we can build statistics from.
 GAME_SUMMARY_QUERY=`cat<<EOF
-SELECT matchid, second, periodid, teamid, playerid, position, section_x, section_y,
+SELECT matchid, second, periodid, teamid, playerid, position, section_x, section_y, x, y,
   (SUM(foul) +
    SUM(out) +
    SUM(yellow_card) +
@@ -100,7 +100,7 @@ SELECT matchid, second, periodid, teamid, playerid, position, section_x, section
   SUM(tackle) AS tackles,
   SUM(tackle_attempt) AS tackle_attempts
  FROM (
-  SELECT FLOOR(TIMESTAMP_TO_MSEC(timestamp)/1000) AS second, periodid, team_eventid, lhs.matchid AS matchid, lhs.teamid AS teamid, lhs.playerid AS playerid, rhs.position AS position,
+ SELECT INTEGER(FLOOR(TIMESTAMP_TO_MSEC(timestamp)/1000)) AS second, periodid, team_eventid, lhs.matchid AS matchid, lhs.teamid AS teamid, lhs.playerid AS playerid, rhs.position AS position, x, y,
    if (x <= 16.6, 0, if(x <= 33.2, 1, if(x <= 49.9, 2, if(x <= 66.4, 3, if(x <= 83, 4, 5))))) AS section_x,
    if (y <= 33, 0, if(y <= 66, 1, 2)) AS section_y, 
    if (typeid == 4 and outcomeid == 1, 1, 0) as foul,
@@ -166,7 +166,7 @@ SELECT matchid, second, periodid, teamid, playerid, position, section_x, section
     pass_0 > 0 OR pass_1 > 0 OR pass_2 > 0 OR pass_3 > 0 OR pass_4 > 0 OR pass_5 > 0 OR 
     pass_attempt_0 > 0 OR pass_attempt_1 > 0 OR pass_attempt_2 > 0 OR pass_attempt_3 > 0 OR pass_attempt_4 > 0 OR pass_attempt_5 > 0 OR 
     yellow_card > 0)
-  GROUP EACH BY matchid, second, periodid, teamid, playerid, position, section_x, section_y
+  GROUP EACH BY matchid, second, periodid, teamid, playerid, position, section_x, section_y, x ,y
   ORDER EACH BY matchid, second, periodid
 EOF`
 
@@ -218,7 +218,7 @@ FROM
     if (prev_y == NULL, y, if(prev_y <= 33, 0, if(prev_x <= 66, 1, 2))) AS prev_section_y
   FROM 
     (SELECT
-      FLOOR(TIMESTAMP_TO_MSEC(timestamp)/1000) AS second,
+      INTEGER(FLOOR(TIMESTAMP_TO_MSEC(timestamp)/1000)) AS second,
       periodid,
       playerid,
       matchid, 
