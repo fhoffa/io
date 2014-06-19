@@ -101,7 +101,7 @@ SELECT matchid, second, periodid, teamid, playerid, position, section_x, section
   SUM(tackle) AS tackles,
   SUM(tackle_attempt) AS tackle_attempts
  FROM (
- SELECT INTEGER(FLOOR(TIMESTAMP_TO_MSEC(timestamp)/1000)) AS second, periodid, team_eventid, lhs.matchid AS matchid, lhs.teamid AS teamid, lhs.playerid AS playerid, rhs.position AS position, x, y,
+ SELECT INTEGER(FLOOR(TIMESTAMP_TO_MSEC(timestamp)/1000)) AS second, periodid, lhs.matchid AS matchid, lhs.teamid AS teamid, lhs.playerid AS playerid, rhs.position AS position, x, y,
    if (x <= 16.6, 0, if(x <= 33.2, 1, if(x <= 49.9, 2, if(x <= 66.4, 3, if(x <= 83, 4, 5))))) AS section_x,
    if (y <= 33, 0, if(y <= 66, 1, 2)) AS section_y, 
    if (typeid == 4 and outcomeid == 1, 1, 0) as foul,
@@ -138,7 +138,7 @@ SELECT matchid, second, periodid, teamid, playerid, position, section_x, section
    if (typeid in (8, 74), 1, 0) as intercept_attempt,
    if (typeid in (7) and outcomeid == 1 , 1, 0) as tackle,  
    if (typeid in (7), 1, 0) as tackle_attempt,
-   FROM [toque.touches] AS lhs
+   FROM (SELECT * FROM (SELECT * FROM [toque.touches]), (SELECT * FROM [$DATASET.touches_approximated])) AS lhs
      JOIN (SELECT matchid, teamid, playerid, position FROM [$POSITION_SUMMARY]) AS rhs 
        ON lhs.matchid=rhs.matchid AND lhs.teamid=rhs.teamid AND lhs.playerid=rhs.playerid
          WHERE 

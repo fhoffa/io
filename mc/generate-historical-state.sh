@@ -109,8 +109,9 @@ SELECT
 FROM [$GAME_STATE] AS lhs
 LEFT OUTER JOIN EACH [$GAME_STATE_TMP] AS rhs
 ON lhs.playerid=rhs.playerid AND lhs.matchid=rhs.matchid AND lhs.timestamp=rhs.timestamp AND lhs.teamid=rhs.teamid
-
+ORDER BY lhs.teamid, lhs.timestamp
 EOF`
+
 GAME_STATE_JOB=GAME_STATE_$SECONDS_$RANDOM_$RANDOM_$$
 bq \
   --project_id=$PROJECTID \
@@ -118,7 +119,7 @@ bq \
     query \
       --format=json \
       --quiet \
-      "$GAME_STATE_QUERY"
+      "$GAME_STATE_QUERY" | sed -e s:\':\\\\\':g -e s:\":\':g -e s:^:\":g -e s:\$:\":g
 
 bq \
   --project_id=$PROJECTID \
