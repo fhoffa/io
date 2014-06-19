@@ -94,6 +94,7 @@ SELECT matchid, second, periodid, teamid, playerid, position, section_x, section
   SUM(throwin_ontarget) AS throwins_ontarget,
   SUM(shot_attempt) AS shot_attempts,
   SUM(shot_ontarget) AS shots_ontarget,
+  SUM(goal) AS goals,
   SUM(own_goal) AS own_goals,
   SUM(intercept) AS intercepts,
   SUM(intercept_attempt) AS intercept_attempts,
@@ -131,6 +132,7 @@ SELECT matchid, second, periodid, teamid, playerid, position, section_x, section
    if (typeid in (15, 16) AND qualifiers.type in (9), 1, 0) as penalty_kick_ontarget,
    if (typeid in (13, 14) AND NOT qualifiers.type in (9, 24, 25, 26, 28, 160), 1, 0) as shot_attempt,
    if (typeid in (15, 16) AND NOT qualifiers.type in (9, 24, 25, 26, 28, 160), 1, 0) as shot_ontarget,
+   if (typeid in (16) AND qualifiers.type not in (28) AND outcomeid == 1, 1, 0) as goal,  
    if (typeid in (16) AND qualifiers.type in (28) AND outcomeid == 1, 1, 0) as own_goal,  
    if (typeid in (8, 74) and outcomeid == 1 , 1, 0) as intercept,  
    if (typeid in (8, 74), 1, 0) as intercept_attempt,
@@ -148,6 +150,7 @@ SELECT matchid, second, periodid, teamid, playerid, position, section_x, section
 ) WHERE
    (foul > 0 OR
     out > 0 OR
+    goal > 0 OR
     own_goal > 0 OR
     shot_attempt > 0 OR
     shot_ontarget > 0 OR
