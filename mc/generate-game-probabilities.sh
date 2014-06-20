@@ -1,14 +1,33 @@
 #!/bin/bash -e
 PROJECTID=cloude-sandbox
-DATASET=crahen
+DATASET=${DATASET:-$USER}
+
+
+if [ -z "$1" ]; then
+  echo 'Generate a set of probability inputs for a game given some teamid:"
+  echo $0 ' [teamid] (e.g. 1216,1411,3273,...)'
+  exit 1
+fi
+TEAMID=$1
+
 
 MOVE_SUMMARY=$DATASET.move_summary
 GAME_SUMMARY=$DATASET.game_summary
 POSITION_SUMMARY=$DATASET.position_summary
 
-# Create the dataset
-bq --project_id=$PROJECTID \
-  mk -f -d $DATASET
+
+function query_to_json() {
+ X=$(echo `bq \
+      --project_id=$PROJECTID \
+      --job_id=$MOVE_PROBABILITY_JOB \
+        query \
+          --quiet \
+          --format=json \
+            $1 | sed -e s:^\"::g -e s:\"\$::g -e s:\':\\\\\":g -e s:\':\":g`)
+ [ x"$X" == x ] && X='[]'
+ echo $X
+}
+
 
 # Query to generate a mapping of player -> move probability
 MOVE_PROBABILITY_QUERY=`cat<<EOF
@@ -23,6 +42,7 @@ SELECT
   ((SUM(direction_y_1))/(SUM(total_y))) AS move_y_stay,
   ((SUM(direction_y_2))/(SUM(total_y))) AS move_y_down
 FROM [$MOVE_SUMMARY]
+  WHERE teamid=$TEAMID
 GROUP BY
   playerid,
   section_x,
@@ -31,19 +51,6 @@ ORDER BY
   playerid,
   section_x
 EOF`
-MOVE_PROBABILITY=$DATASET.move_probabilities_player
-MOVE_PROBABILITY_JOB=MOVE_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $MOVE_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$MOVE_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $MOVE_PROBABILITY \
-        "$MOVE_PROBABILITY_QUERY"
 
 # Query to generate a mapping of player -> shot probability
 SHOT_PROBABILITY_QUERY=`cat<<EOF
@@ -53,7 +60,8 @@ SELECT
   section_y,
   (SUM(shots_ontarget)/(SUM(shot_attempts))) AS shot_ontarget
 FROM [$GAME_SUMMARY] WHERE
-  shot_attempts > 0
+  shot_attempts > 0 AND
+  teamid=$TEAMID
 GROUP BY
   playerid,
   section_x,
@@ -62,19 +70,6 @@ ORDER BY
   playerid,
   section_x
 EOF`
-SHOT_PROBABILITY=$DATASET.shot_probabilities_player
-SHOT_PROBABILITY_JOB=SHOT_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $SHOT_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$SHOT_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $SHOT_PROBABILITY \
-        "$SHOT_PROBABILITY_QUERY"
 
 
 # Query to generate a mapping of player -> pass probability
@@ -90,7 +85,8 @@ SELECT
   (SUM(pass_4)/(SUM(pass_attempt_0) + SUM(pass_attempt_1) + SUM(pass_attempt_2) + SUM(pass_attempt_3) + SUM(pass_attempt_4) + SUM(pass_attempt_5))) pass_4,
   (SUM(pass_5)/(SUM(pass_attempt_0) + SUM(pass_attempt_1) + SUM(pass_attempt_2) + SUM(pass_attempt_3) + SUM(pass_attempt_4) + SUM(pass_attempt_5))) pass_5,
 FROM [$GAME_SUMMARY] WHERE
-  (pass_attempt_0 + pass_attempt_1 + pass_attempt_2 + pass_attempt_3 + pass_attempt_4 + pass_attempt_5) > 0
+  (pass_attempt_0 + pass_attempt_1 + pass_attempt_2 + pass_attempt_3 + pass_attempt_4 + pass_attempt_5) > 0 AND
+  teamid=$TEAMID
 GROUP BY
   playerid,
   section_x,
@@ -99,19 +95,6 @@ ORDER BY
   playerid,
   section_x
 EOF`
-PASS_PROBABILITY=$DATASET.pass_probabilities_player
-PASS_PROBABILITY_JOB=PASS_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $PASS_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$PASS_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $PASS_PROBABILITY \
-        "$PASS_PROBABILITY_QUERY"
 
 
 # Query to generate a mapping of player -> save probability
@@ -122,7 +105,8 @@ SELECT
   section_y,
   (SUM(save)/(SUM(save_attempts))) AS save
 FROM [$GAME_SUMMARY] WHERE
-  save_attempts > 0
+  save_attempts > 0 AND
+  teamid=$TEAMID
 GROUP BY
   playerid,
   section_x,
@@ -131,19 +115,6 @@ ORDER BY
   playerid,
   section_x
 EOF`
-SAVE_PROBABILITY=$DATASET.save_probabilities_player
-SAVE_PROBABILITY_JOB=SAVE_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $SAVE_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$SAVE_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $SAVE_PROBABILITY \
-        "$SAVE_PROBABILITY_QUERY"
 
 
 # Query to generate a mapping of player -> intercept probability
@@ -154,7 +125,8 @@ SELECT
   section_y,
   (SUM(intercepts)/(SUM(intercept_attempts))) AS intercept
 FROM [$GAME_SUMMARY] WHERE
-  intercept_attempts > 0
+  intercept_attempts > 0 AND
+  teamid=$TEAMID
 GROUP BY
   playerid,
   section_x,
@@ -163,20 +135,6 @@ ORDER BY
   playerid,
   section_x
 EOF`
-INTERCEPT_PROBABILITY=$DATASET.intercept_probabilities_player
-INTERCEPT_PROBABILITY_JOB=INTERCEPT_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $INTERCEPT_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$INTERCEPT_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $INTERCEPT_PROBABILITY \
-        "$INTERCEPT_PROBABILITY_QUERY"
-
 
 
 # Query to generate a mapping of player -> tackle probability
@@ -187,7 +145,8 @@ SELECT
   section_y,
   (SUM(tackles)/(SUM(tackle_attempts))) AS tackle
 FROM [$GAME_SUMMARY] WHERE
-  tackle_attempts > 0
+  tackle_attempts > 0 AND
+  teamid=$TEAMID
 GROUP BY
   playerid,
   section_x,
@@ -196,19 +155,6 @@ ORDER BY
   playerid,
   section_x
 EOF`
-TACKLE_PROBABILITY=$DATASET.tackle_probabilities_player
-TACKLE_PROBABILITY_JOB=TACKLE_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $TACKLE_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$TACKLE_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $TACKLE_PROBABILITY \
-        "$TACKLE_PROBABILITY_QUERY"
 
 
 # Query to generate a mapping of player -> foul probability
@@ -226,22 +172,10 @@ SELECT
   (SUM(penalty_kicks_ontarget))/(SUM(throwin_attempts)+SUM(free_kick_attempts)+SUM(penalty_kick_attempts)+SUM(yellow_cards)+SUM(red_cards)) AS penalty_kick,
   (SUM(penalty_kick_attempts))/(SUM(throwin_attempts)+SUM(free_kick_attempts)+SUM(penalty_kick_attempts)+SUM(yellow_cards)+SUM(red_cards)) AS penalty_kick_attempt,
 FROM [$GAME_SUMMARY] WHERE
-  (throwin_attempts+free_kick_attempts+penalty_kick_attempts+yellow_cards+red_cards) > 0
+  (throwin_attempts+free_kick_attempts+penalty_kick_attempts+yellow_cards+red_cards) > 0 AND
+  teamid=$TEAMID
   GROUP BY playerid, section_x, section_y
 EOF`
-FOUL_PROBABILITY=$DATASET.foul_probabilities_player
-FOUL_PROBABILITY_JOB=FOUL_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $FOUL_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$FOUL_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $FOUL_PROBABILITY \
-        "$FOUL_PROBABILITY_QUERY"
 
 
 # Query to generate a mapping of player -> out probability
@@ -255,51 +189,10 @@ SELECT
   (SUM(corner_kicks_ontarget))/(SUM(throwin_attempts)+SUM(corner_kick_attempts)) AS corner_kick,
   (SUM(corner_kick_attempts))/(SUM(throwin_attempts)+SUM(corner_kick_attempts)) AS corner_kick_attempt,
 FROM [$GAME_SUMMARY] WHERE
-  (throwin_attempts+corner_kick_attempts) > 0
+  (throwin_attempts+corner_kick_attempts) > 0 AND
+  teamid=$TEAMID
   GROUP BY playerid, section_x, section_y
 EOF`
-OUT_PROBABILITY=$DATASET.out_probabilities_player
-OUT_PROBABILITY_JOB=OUT_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $OUT_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$OUT_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $OUT_PROBABILITY \
-        "$OUT_PROBABILITY_QUERY"
-
-
-bq \
-  --project_id=$PROJECTID \
-    wait $MOVE_PROBABILITY_JOB
-bq \
-  --project_id=$PROJECTID \
-    wait $SHOT_PROBABILITY_JOB
-bq \
-  --project_id=$PROJECTID \
-    wait $PASS_PROBABILITY_JOB
-
-
-bq \
-  --project_id=$PROJECTID \
-    wait $SAVE_PROBABILITY_JOB
-bq \
-  --project_id=$PROJECTID \
-    wait $INTERCEPT_PROBABILITY_JOB
-bq \
-  --project_id=$PROJECTID \
-    wait $TACKLE_PROBABILITY_JOB
-
-bq \
-  --project_id=$PROJECTID \
-    wait $FOUL_PROBABILITY_JOB
-bq \
-  --project_id=$PROJECTID \
-    wait $OUT_PROBABILITY_JOB
 
 
 # Query to generate a mapping of player -> defense probability
@@ -312,25 +205,13 @@ SELECT
   (SUM(intercepts))/SUM(defense_event_count) AS intercept,
   (SUM(save))/SUM(defense_event_count) AS save
 FROM [soccer.game_summary_0]
+WHERE teamid=$TEAMID
   GROUP BY playerid, section_x, section_y
 EOF`
-DEFENSE_PROBABILITY=$DATASET.defense_probabilities_player
-DEFENSE_PROBABILITY_JOB=DEFENSE_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $DEFENSE_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$DEFENSE_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $DEFENSE_PROBABILITY \
-        "$DEFENSE_PROBABILITY_QUERY"
 
 
 # Query to generate a mapping of player -> offense probability
-OFFSENSE_PROBABILITY_QUERY=`cat<<EOF
+OFFENSE_PROBABILITY_QUERY=`cat<<EOF
 SELECT
   playerid,
   section_x,
@@ -339,28 +220,25 @@ SELECT
   (SUM(intercepts))/SUM(defense_event_count) AS intercept,
   (SUM(save))/SUM(defense_event_count) AS save
 FROM [soccer.game_summary_0]
+WHERE teamid=$TEAMID
   GROUP BY playerid, section_x, section_y
 EOF`
-OFFSENSE_PROBABILITY=$DATASET.offsense_probabilities_player
-OFFSENSE_PROBABILITY_JOB=OFFSENSE_PROBABILITY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $OFFSENSE_PROBABILITY"
-bq \
-  --project_id=$PROJECTID \
-  --synchronous_mode=false \
-  --job_id=$OFFSENSE_PROBABILITY_JOB \
-    query \
-      -n 0 \
-      --allow_large_results \
-      --replace \
-      --destination_table $OFFSENSE_PROBABILITY \
-        "$OFFSENSE_PROBABILITY_QUERY"
 
 
-bq \
-  --project_id=$PROJECTID \
-    wait $OFFSENSE_PROBABILITY_JOB
-bq \
-  --project_id=$PROJECTID \
-    wait $DEFENSE_PROBABILITY_JOB
-
+# Generate a JSON input for the simulation the describes all of the aspects 
+# of each player.
+cat<<EOF
+{
+    "move": `query_to_json "$MOVE_PROBABILITY_QUERY"`,
+    "shot":`query_to_json "$SHOT_PROBABILITY_QUERY"`,
+    "save": `query_to_json "$SAVE_PROBABILITY_QUERY"`,
+    "pass": `query_to_json "$PASS_PROBABILITY_QUERY"`,
+    "intercept": `query_to_json "$INTERCEPT_PROBABILITY_QUERY"`,
+    "tackle": `query_to_json "$TACKLE_PROBABILITY_QUERY"`,
+    "foul": `query_to_json "$FOUL_PROBABILITY_QUERY"`,
+    "out": `query_to_json "$OUT_PROBABILITY_QUERY"`,
+    "defense": `query_to_json "$DEFENSE_PROBABILITY_QUERY"`,
+    "offense": `query_to_json "$OFFENSE_PROBABILITY_QUERY"`
+}
+EOF
 
