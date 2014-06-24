@@ -190,9 +190,18 @@ def dropUnbalancedMatches(data):
   """
 
   keep = []
-  i = 0;
+  i = 0
   while i < len(data) - 1:
-    if data['matchid'][i] == data['matchid'][i+1]:
+    row = data.iloc[i]
+    skipped = False
+    for col in data:
+      if isinstance(col, float) and math.isnan(col):
+        keep.append(False)
+        i += 1
+        skipped = True
+       
+    if skipped: pass
+    elif data.iloc[i]['matchid'] == data.iloc[i+1]['matchid']:
       keep.append(True)
       keep.append(True)
       i += 2
@@ -534,6 +543,7 @@ def runGameNoDraw(data, ignore_cols, target_col='points'):
     
   count = len(data[target_col])
 
+  print X_test2[features]
   predictions = _predictModel(model, X_test2[features])
   base_count = sum([test_f(yval) for yval in data[target_col]])
   baseline = base_count * 1.0 / count
@@ -573,18 +583,18 @@ def runGameNoDraw(data, ignore_cols, target_col='points'):
   return (X_test_games, predicted)
 
 def _predictModel(model, X_test):
-  X_test = X_test.copy()
+  X_test = X_test.copy().dropna()
   X_test['intercept'] = 1.0
   return model.predict(X_test)
 
 def trainModel(data, ignore_cols):
   # Validate the data
-  data = prepareData(data)
+  data = prepareData(data).dropna()
   target_col = 'points'
   (train, test) = split(data)
   (y_test, X_test) = extractTarget(test, target_col)
   (y_train, X_train) = extractTarget(train, target_col)
-  X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols)))   
+  X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols)))
 
   y = [int(yval) == 3 for yval in y_train]
   X_train2['intercept'] = 1.0
@@ -663,7 +673,7 @@ def buildTeamMatrix(data, target_col):
     points = home[target_col] - away[target_col]
 
     # Discount home team's performance.
-    teams[home_id][game] = .75
+    teams[home_id][game] = 0.75 
     teams[away_id][game] = -1.0
     result[game] = points
 
@@ -692,20 +702,22 @@ def buildPower(X, y, coerce_fn, acc=0.0001):
       if (qqs[ii] > val): return ii * 0.33
     return 1.0
     
-  return params.apply(snap).to_dict()
+  # Snap power data to rought percentiles.
+  # return params.apply(snap).to_dict()
   # return params.apply(lambda val: 0.0 if val < q1 else (.5 if val < q2 else 1.0)).to_dict()
-  # return params.to_dict()
+  return params.to_dict()
 
 def addPower(data, cols):
   data = data.copy()
   competitions = data['competitionid'].unique()
   for (col, coerce_fn, final_name) in cols:
-    power_col = pd.Series(np.zeros(len(data)))
     power = {}
     for competition in competitions:
       acc = 0.000001
       alpha = 10.0
       competition_data = data[data['competitionid'] == competition]
+      # Restrict the number of competitions so that we can make
+      # sure we'll work with WC data.
       # competition_data = competition_data.iloc[:100]
       while True:
         if alpha < 1.0:
@@ -731,15 +743,16 @@ def addPower(data, cols):
         continue
 
     names = {}
-    
+    power_col = pd.Series(np.zeros(len(data)), data.index)
     for index in xrange(len(data)):
       teamid = str(data.iloc[index]['teamid'])
-      if not teamid in power:
-        print "Missing power data for %s" % teamid
-        power[teamid] = 0.5
-      names[data.iloc[index]['team_name']] = power[teamid]
-      power_col[index] = power[teamid]
-    print ['%s: %0.03f' % (x[0], x[1]) for x in sorted(names.items(), key=(lambda x: x[1]))]
+      # if not teamid in power:
+      #  print "Missing power data for %s" % teamid
+      #  power[teamid] = 0.5
+      # names[data.iloc[index]['team_name']] = power[teamid]
+      # print "%d: %s -> %s" % (index, teamid, power.get(teamid, 0.5))
+      power_col.iloc[index] = power.get(teamid, 0.5)
+    # print ['%s: %0.03f' % (x[0], x[1]) for x in sorted(names.items(), key=(lambda x: x[1]))]
     data['power_%s' % (final_name)] = power_col
   return data
 
@@ -751,3 +764,125 @@ def prepareData(data):
   checkData(data)
   return data
 
+
+def knownWinners(names): 
+  """ Known winners of games """
+  winners = {
+    '1A': 'Brazil',
+    '2A': 'Mexico',
+    '1B': 'Netherlands',
+    '2B': 'Chile',
+
+    # FAKE DATA FROM HERE:
+    '1C': 'Colombia',
+    '2C': "Cote D'Ivoire",
+    '1D': 'Costa Rica',
+    '2D': 'Italy',
+    '1E': 'France',
+    '2E': 'Ecuador',
+    '1F': 'Argentina',
+    '2F': 'Nigeria',
+    '1G': 'Germany',
+    '2G': 'United States',
+    '1H': 'Belgium',
+    '2H': 'Algeria'
+    }
+  return winners
+
+def buildBracket():
+  return {
+      # Round of 16
+      '16_1': ('1A', '2B'),
+      '16_2': ('1C', '2D'),
+      '16_3': ('2A', '1B'),
+      '16_4': ('2C', '1D'),
+      '16_5': ('1E', '2F'),
+      '16_6': ('1G', '2H'),
+      '16_7': ('2E', '1F'),
+      '16_8': ('2G', '1G'),
+
+      # Quarters
+      'q_1': ('16_1', '16_2'),
+      'q_2': ('16_5', '16_6'),
+      'q_3': ('16_3', '16_4'),
+      'q_4': ('16_7', '16_8'),
+ 
+      # Semis
+      's_1': ('q_1', 'q_2'),
+      's_2': ('q_3', 'q_4'),
+ 
+      # Final
+      'f_1': ('s_1', 's_2'),
+      }
+  
+def predictWinner(t1, t2, sim_f):
+    if t1 is None: return t2
+    elif t2 is None: return t1
+    else: return sim_f(t1, t2)
+
+def knockoutSim(groups, sim_f):
+  brackets = buildBrackets()
+  winners = groups.copy()
+  progress = len(winners)
+  while progress:
+    print 'Simulating %d games in this round' % (progress,)
+
+    progress = 0
+    for (game, (t1, t2)) in brackets.items():
+      if not game in winners:
+        winners[game] = predictWinner(winners.get(t1, None), 
+                                      winners.get(t2, None))
+        if game in winners:
+          progress += 1
+
+  return winners
+
+def wcPower(wc_data):
+  # Tweak the world cup data to update values like home field advantage.
+  wc_power = pd.read_csv('wc_power.csv')
+
+  # Scale power rankings to the range [0,1]
+  wc_power['power_ranking'] = wc_power['power_ranking'].sub(
+      wc_power['power_ranking'].min())
+  wc_power['power_ranking'] = wc_power['power_ranking'].div(
+      wc_power['power_ranking'].max())
+
+  overrides = {}
+  home_override = {}
+  for ii in xrange(len(wc_power)):
+      row = wc_power.iloc[ii]
+      overrides[row['teamid']] = (row['power_ranking'],
+                                  row['is_home'])
+
+  wc_data['power_wins'] = pd.Series(np.zeros(len(wc_data)))
+  for ii in xrange(len(wc_data)):
+      row = wc_data.iloc[ii]
+      team = row['teamid']
+      if team in overrides:
+          (new_power, new_home) = overrides[team]
+          row['power_wins'] = new_power
+          row['is_home'] = new_home
+      else:
+          # If we don't know, assume middling.
+          row['power_wins'] = 0.5
+
+def buildWcData(data):
+
+  wc_dict = {}
+  
+  for ii in xrange(len(data)):
+    row = wc_data.iloc[ii]
+    team = row['teamid']
+    # if not team in 
+
+def makeSim(model, data):
+  # Data should be a datframe with best knowledge about wc teams, one row
+  # per team
+  def sim_f(t1, t2):
+    df = data[data['teamid'] in [t1, t2]]
+    to_predict = splice(coerceDf(cloneAndDrop(df, ignore_cols)))
+    predictions = _predictModel(model, to_predict)
+    print predictions
+    return predictions[t1] > 0.5
+    
+  return sim_f
