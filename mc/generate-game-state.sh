@@ -1,4 +1,4 @@
-#!/bin/bash -ex
+#!/bin/bash -e
 PROJECTID=cloude-sandbox
 DATASET=${DATASET:-$USER}
 
@@ -25,6 +25,7 @@ function query_to_json() {
 
 
 # Add the most recent player location to the rolled up stats
+TOUCHES_SUMMARY=$DATASET.touches_summary
 STATE_SUMMARY=$DATASET.state_summary
 STATE_SUMMARY_QUERY=`cat<<EOF
 SELECT 
@@ -59,7 +60,7 @@ SELECT
  lhs.intercept_attempts AS intercept_attempts,
  lhs.tackles AS tackles,
  lhs.tackle_attempts AS tackle_attempts
-FROM [$STATE_SUMMARY] AS lhs
+FROM [$TOUCHES_SUMMARY] AS lhs
 LEFT OUTER JOIN EACH (SELECT 
  innerlhs.timestamp AS timestamp,
  innerlhs.matchid AS matchid, 
@@ -90,10 +91,10 @@ LEFT OUTER JOIN EACH (SELECT
  innerlhs.intercept_attempts AS intercept_attempts,
  innerlhs.tackles AS tackles,
  innerlhs.tackle_attempts AS tackle_attempts
-  FROM [$STATE_SUMMARY] AS innerlhs
+  FROM [$TOUCHES_SUMMARY] AS innerlhs
 LEFT JOIN (SELECT
     playerid, teamid, matchid, MAX(timestamp) AS timestamp,
-   FROM [$STATE_SUMMARY]
+   FROM [$TOUCHES_SUMMARY]
 WHERE
   matchid=$MATCHID AND timestamp<=$TIMESTAMP
 GROUP BY
@@ -109,4 +110,3 @@ cat<<EOF
     "state": `query_to_json "$STATE_SUMMARY_QUERY"`
 }
 EOF
-

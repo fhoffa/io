@@ -326,7 +326,7 @@ bq \
     wait $GAME_SUMMARY_JOB
 
 
-STATE_SUMMARY_QUERY=`cat<<EOF
+TOUCHES_SUMMARY_QUERY=`cat<<EOF
 SELECT
  ((lhs.timestamp-rhs.min)/(rhs.max-rhs.min)) AS timestamp,
  lhs.matchid AS matchid, 
@@ -399,21 +399,19 @@ SELECT
     INNER JOIN (SELECT matchid, MIN(timestamp) AS min, MAX(timestamp) AS max FROM [$GAME_SUMMARY] GROUP BY matchid) AS rhs
       ON lhs.matchid = rhs.matchid
 EOF`
-STATE_SUMMARY=$DATASET.state_summary
-STATE_SUMMARY_JOB=STATE_SUMMARY_$SECONDS_$RANDOM_$RANDOM_$$
-echo "Generating $STATE_SUMMARY"
+TOUCHES_SUMMARY=$DATASET.touches_summary
+TOUCHES_SUMMARY_JOB=TOUCHES_SUMMARY_$SECONDS_$RANDOM_$RANDOM_$$
+echo "Generating $TOUCHES_SUMMARY"
 bq \
   --project_id=$PROJECTID \
-  --job_id=$STATE_SUMMARY_JOB \
+  --job_id=$TOUCHES_SUMMARY_JOB \
     query \
       -n 0 \
       --allow_large_results \
       --replace \
-      --destination_table $STATE_SUMMARY \
-        "$STATE_SUMMARY_QUERY"
+      --destination_table $TOUCHES_SUMMARY \
+        "$TOUCHES_SUMMARY_QUERY"
 bq \
   --project_id=$PROJECTID \
-    wait $STATE_SUMMARY_JOB
-
-
+    wait $TOUCHES_SUMMARY_JOB
 

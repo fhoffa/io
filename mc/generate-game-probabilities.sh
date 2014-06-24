@@ -4,7 +4,7 @@ DATASET=${DATASET:-$USER}
 
 
 if [ -z "$1" ]; then
-  echo 'Generate a set of probability inputs for a game given some teamid:"
+  echo 'Generate a set of probability inputs for a game given some teamid:'
   echo $0 ' [teamid] (e.g. 1216,1411,3273,...)'
   exit 1
 fi
@@ -204,7 +204,7 @@ SELECT
   (SUM(tackles))/SUM(defense_event_count) AS tackle,
   (SUM(intercepts))/SUM(defense_event_count) AS intercept,
   (SUM(save))/SUM(defense_event_count) AS save
-FROM [soccer.game_summary_0]
+FROM [$GAME_SUMMARY]
 WHERE teamid=$TEAMID
   GROUP BY playerid, section_x, section_y
 EOF`
@@ -219,7 +219,7 @@ SELECT
   (SUM(tackles))/SUM(defense_event_count) AS tackle,
   (SUM(intercepts))/SUM(defense_event_count) AS intercept,
   (SUM(save))/SUM(defense_event_count) AS save
-FROM [soccer.game_summary_0]
+FROM [$GAME_SUMMARY]
 WHERE teamid=$TEAMID
   GROUP BY playerid, section_x, section_y
 EOF`
