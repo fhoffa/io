@@ -1,0 +1,31 @@
+create-touches-auxillary.sh:
+
+This script generates an auxillary toque.touches-style table which contains generated toque.touches data. This auxillary data is combined in union with the source toque.touches data as the first step in processing. You can remap players and teams here (useful for inventing teams to play imaginary games).
+
+
+create-game-summaries.sh:
+
+The script extracts and formats all of the toque.toches data (source and auxillary) as a vector where each column represents some facet of the data.
+
+
+create-position-probabilities.sh:
+
+The scripts extracts probabilities for all playes/positions. All of the players playing a position are aggregated together here.
+
+
+create-player-probabilities.sh:
+
+The scripts extracts probabilities for all playes/positions. Each player playing each position is aggregated together here.
+
+
+
+Generates the data for 
+
+- generates the per/position aggregated statistics (to fallback on when we don't have enough player-specific data)
+create-player-probabilities.sh - generates the per/player aggregated statistics
+
+
+generate-historical-state.sh <matchid> <time> 
+  
+  matchid: The match to play [0.0, 1.0]
+  time:    The time in the match to start simulating from
