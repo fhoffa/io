@@ -1,6 +1,8 @@
 from pandas.io import gbq
 
-touch_table = 'cloude-sandbox:toque.touches_backup'
+touch_table = 'cloude-sandbox:toque.touches'
+match_game_table = 'SELECT * FROM [cloude-sandbox:temp.match_games]'
+match_goals_table = 'SELECT * FROM [cloude-sandbox:temp.match_goals_table_20140623]'
 
 # Number of games to look at history from:
 history_size = 3
@@ -103,7 +105,7 @@ GROUP BY matchid, teamid
 
 # Compute the number of goals in the game. To do this, we want to subtract off any own goals
 # a team scored against themselves, and add the own goals that a team's opponent scored.
-match_goals = """
+match_goals_subquery = """
 SELECT matchid, teamid , goals + delta as goals, timestamp as timestamp 
 FROM (
 SELECT goals.matchid as matchid , goals.teamid as teamid, goals.goals as goals, goals.timestamp as timestamp,
@@ -127,9 +129,9 @@ LEAD(matchid, 1) OVER (PARTITION BY teamid ORDER BY timestamp DESC) as last_matc
 LEAD(timestamp, 1) OVER (PARTITION BY teamid ORDER BY timestamp DESC) as last_match_timestamp,
 LEAD(timestamp, %(history_size)d) OVER (PARTITION BY teamid ORDER BY timestamp DESC) as tenth_last_matchid,
 LEAD(timestamp, %(history_size)d) OVER (PARTITION BY teamid ORDER BY timestamp DESC) as tenth_last_match_timestamp,
-FROM (%(match_goals)s) 
+FROM (%(match_games)s) 
 )h
-JOIN (%(match_goals)s) m1
+JOIN (%(match_games)s) m1
 ON h.teamid = m1.teamid
 WHERE
 h.tenth_last_match_timestamp is not NULL AND
@@ -138,8 +140,7 @@ m1.timestamp >= h.tenth_last_match_timestamp AND
 m1.timestamp <= h.last_match_timestamp 
 
 """ % {'history_size': history_size, 
-#       'match_goals': 'SELECT * FROM [temp.all_match_goals_table]'}
-       'match_goals': 'SELECT * FROM [temp.match_games_table]'}
+       'match_games': match_game_table}
         
 
 team_game_summary = """
@@ -148,7 +149,7 @@ t.matchid as matchid,
 t.teamid as teamid,
 t.passes as passes,
 t.bad_passes as bad_passes,
-t.passes / (t.passes + t.bad_passes) as pass_ratio,
+t.passes / (t.passes + t.bad_passes + 1) as pass_ratio,
 t.corners as corners,
 t.fouls as fouls,
 t.shots as shots,
@@ -192,16 +193,7 @@ JOIN
 (%(pass_stats)s) p
 ON
 t.matchid = p.matchid and t.teamid = p.teamid
-JOIN 
-(SELECT * FROM 
- [temp.match_games_table]
- /*
-(SELECT INTEGER(SUBSTR(hometeam_id, 2)) teamid, competitionid, hometeam_name team_name, STRING(gameid) matchid, 1 is_home
-FROM [toque.matches]),
-(SELECT INTEGER(SUBSTR(awayteam_id, 2)) teamid, competitionid, awayteam_name team_name, STRING(gameid) matchid, 0 is_home
-FROM [toque.matches])
- */
-) h
+JOIN  (%(match_games)s) h
 ON t.matchid = h.matchid AND t.teamid = h.teamid
 LEFT OUTER JOIN (%(expected_goals)s) x
 ON t.matchid = x.matchid AND t.teamid = x.teamid
@@ -215,7 +207,8 @@ ON t.matchid = x.matchid AND t.teamid = x.teamid
        'pass_stats': pass_stats,
        'expected_goals': expected_goals_match,
        'touch_table': touch_table,
-       'match_goals': "SELECT * FROM [temp.match_goals_table]"}
+       'match_games': match_game_table,
+       'match_goals': match_goals_table}
 # print team_game_summary
 
 team_game_op_summary = """
@@ -255,7 +248,7 @@ SELECT cur.matchid as matchid,
 
   if (opp.shots > 0, cur.shots / opp.shots, cur.shots * 1.0) as shots_op_ratio,
   if (opp.goals > 0, cur.goals / opp.goals, cur.goals * 1.0) as goals_op_ratio,
-  cur.pass_ratio / opp.pass_ratio as pass_op_ratio,
+  if (opp.pass_ratio > 0, cur.pass_ratio / opp.pass_ratio, 1.0) as pass_op_ratio,
  
   if (cur.goals > opp.goals, 3,
     if (cur.goals == opp.goals, 1, 0)) as points,
@@ -275,12 +268,10 @@ summary.matchid as matchid,
 pts.teamid as teamid,
 pts.op_teamid as op_teamid,
 pts.competitionid as competitionid,
-pts.points as points,
-pts.goals as goals,
-pts.op_goals as op_goals,
 pts.is_home as is_home,
 pts.team_name as team_name,
 pts.op_team_name as op_team_name,
+pts.timestamp as timestamp,
 
 summary.total_points as total_points,
 summary.total_goals as total_goals,
@@ -347,15 +338,79 @@ ON hist.previous_match = games.matchid and
  hist.teamid = games.teamid
 GROUP BY matchid, teamid
 ) as summary
-JOIN (%(team_game_op_summary)s) pts on summary.matchid = pts.matchid
+JOIN (%(match_games)s) pts on summary.matchid = pts.matchid
 and summary.teamid = pts.teamid
 WHERE summary.matchid <> '442291'
 ORDER BY matchid, is_home DESC
 """ % {'team_game_op_summary': team_game_op_summary,
+       'match_games': match_game_table,
        'match_history': match_history}
 
+history_query_with_goals= """
+SELECT   
+
+h.matchid as matchid,
+h.teamid as teamid,
+h.op_teamid as op_teamid,
+h.competitionid as competitionid,
+h.is_home as is_home,
+h.team_name as team_name,
+h.op_team_name as op_team_name,
+h.timestamp as timestamp,
+
+g.goals as goals,
+op.goals as op_goals,
+if (g.goals > op.goals, 3,
+  if (g.goals == op.goals, 1, 0)) as points,
+
+h.total_points as total_points,
+h.total_goals as total_goals,
+h.total_op_goals as total_op_goals,
+
+h.pass_70 as pass_70,
+h.pass_80 as pass_80,
+h.op_pass_70 as op_pass_70,
+h.op_pass_80 as op_pass_80,
+h.expected_goals as expected_goals,
+h.op_expected_goals as op_expected_goals,
+h.passes as passes,
+h.bad_passes as bad_passes,
+h.pass_ratio as pass_ratio,
+h.corners as corners,
+h.fouls as fouls,
+h.cards as cards,
+h.shots as shots,
+
+h.op_passes as op_passes,
+h.op_bad_passes as op_bad_passes,
+h.op_corners as op_corners,
+h.op_fouls as op_fouls,
+h.op_cards as op_cards,
+h.op_shots as op_shots,
+
+h.goals_op_ratio as goals_op_ratio,
+h.shots_op_ratio as shots_op_ratio,
+h.pass_op_ratio as pass_op_ratio,
+
+FROM (%(history_query)s) h
+JOIN (%(match_goals)s) g
+ON h.matchid = g.matchid and h.teamid = g.teamid
+JOIN (%(match_goals)s) op
+ON h.matchid = op.matchid and h.op_teamid = op.teamid
+""" % {'history_query': history_query,
+       'match_goals': match_goals_table
+      }
+
+wc_history_query = """
+SELECT * FROM (%(history_query)s) WHERE competitionid = 4
+""" % {'history_query': history_query,
+      }
+
+def get_wc_features():
+  return gbq.reqd_gbq(history_query)
+
 def get_features():
-  return gbq.read_gbq(history_query)
+  return gbq.read_gbq(history_query_with_goals)
 
 def get_non_feature_columns():
   return ['teamid', 'op_teamid', 'matchid', 'competitionid',

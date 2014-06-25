@@ -275,13 +275,13 @@ def buildModel(y, X, acc=0.0000001, alpha=l1_alpha):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.Logit(y, X)
-  return logit.fit_regularized(maxiter=10240, alpha=alpha, acc=acc)
+  return logit.fit_regularized(maxiter=10240, alpha=alpha, acc=acc, disp=False)
 
 def buildModelMn(y, X, acc=0.0000001, alpha=l1_alpha):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.MNLogit(y, X)
-  return logit.fit_regularized(maxiter=10240, alpha=alpha, acc=acc)
+  return logit.fit_regularized(maxiter=10240, alpha=alpha, acc=acc, disp=False)
 
 def classify(probabilities, proportions, levels=None):
   """ Given predicted probabilities and a vector of proportions,
@@ -598,8 +598,8 @@ def trainModel(data, ignore_cols):
 
   y = [int(yval) == 3 for yval in y_train]
   X_train2['intercept'] = 1.0
-  logit = sm.Logit(y, X_train2)
-  model = logit.fit_regularized(maxiter=10240, alpha=8.0) 
+  logit = sm.Logit(y, X_train2, disp=False)
+  model = logit.fit_regularized(maxiter=10240, alpha=8.0, disp=False) 
   return (model, test)
 
 
