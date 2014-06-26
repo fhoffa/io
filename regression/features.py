@@ -1,7 +1,7 @@
 from pandas.io import gbq
 
 touch_table = 'cloude-sandbox:toque.touches'
-match_game_table = 'SELECT * FROM [cloude-sandbox:temp.match_games]'
+match_game_table = 'SELECT * FROM [cloude-sandbox:temp.match_games_with_replacement]'
 match_goals_table = 'SELECT * FROM [cloude-sandbox:temp.match_goals_table_20140623]'
 
 # Number of games to look at history from:
@@ -403,11 +403,12 @@ ON h.matchid = op.matchid and h.op_teamid = op.teamid
 
 wc_history_query = """
 SELECT * FROM (%(history_query)s) WHERE competitionid = 4
+AND timestamp > '2014-01-01 00:00:00.000000'
 """ % {'history_query': history_query,
       }
 
 def get_wc_features():
-  return gbq.reqd_gbq(history_query)
+  return gbq.read_gbq(wc_history_query)
 
 def get_features():
   return gbq.read_gbq(history_query_with_goals)

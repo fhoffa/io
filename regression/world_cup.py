@@ -456,13 +456,33 @@ def teamTest(y):
   return results
 
 def teamTestProb(y):
-
   results = []
   for game in range(len(y)/2):
+    g0 = float(y.iloc[game * 2])
+    g1 = float(y.iloc[game * 2 + 1])
+    results.append(g0/(g0+g1))
+  return results
+
+def teamTestProbOld(y):
+  results = []
+  for game in xrange(len(y)/2):
     g0 = int(y.iloc[game * 2])
     g1 = int(y.iloc[game * 2 + 1])
     results.append(g0-g1)
   return results
+
+def extractPredictions(data, predictions):
+  probs = teamTestProb(predictions)
+  team0 = []
+  team1 = []
+  for game in xrange(len(data)/2):
+    t0 = data['team_name'].iloc[game * 2]
+    t1 = data['op_team_name'].iloc[game * 2]
+    team0.append(t0)
+    team1.append(t1)
+  return pd.DataFrame([pd.Series(team0), 
+                       pd.Series(team1),
+                       pd.Series(probs).mul(100)])
 
 def checkData(data):
   """ Walks a dataframe and make sure that all is well. """ 
