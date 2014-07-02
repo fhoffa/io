@@ -313,7 +313,7 @@ def classify(probabilities, proportions, levels=None):
   _, results, _ = zip(*predictions)
   return results
 
-def validate(k, y, predictions, baseline=0.5, compute_auc=False):
+def validate(k, y, predictions, baseline=0.5, compute_auc=False, quiet=True):
   """ Validates binary predictions, computes confusion matrix and AUC.
 
     Given a vector of predictions and actual values, scores how well we
@@ -390,11 +390,13 @@ def validate(k, y, predictions, baseline=0.5, compute_auc=False):
   if fp + fn + tp + tn <> len(y):
     raise Exception("Unexpected confusion matrix")
 
-  print "(%s) Base: %0.03g Acc: %0.03g P(1|t): %0.03g P(0|f): %0.03g\nLift: %0.03g Auc: %s" % (
-    k, baseline, accuracy, p1_t, p0_f, lift, auc_value)
- 
-  print "Fp/Fn/Tp/Tn p/n/c: %d/%d/%d/%d %d/%d/%d" % (
-    fp, fn, tp, tn, p, n, len(y))
+  if quiet:
+    print "(%s) Lift: %0.03g Auc: %s" % (k, lift, auc_value)
+  else:
+    print "(%s) Base: %0.03g Acc: %0.03g P(1|t): %0.03g P(0|f): %0.03g\nLift: %0.03g Auc: %s" % (
+      k, baseline, accuracy, p1_t, p0_f, lift, auc_value)
+    print "Fp/Fn/Tp/Tn p/n/c: %d/%d/%d/%d %d/%d/%d" % (
+      fp, fn, tp, tn, p, n, len(y))
   # roc_data.plot()
   
 def coerceTypes(vals):
@@ -475,14 +477,26 @@ def extractPredictions(data, predictions):
   probs = teamTestProb(predictions)
   team0 = []
   team1 = []
+  points = []
   for game in xrange(len(data)/2):
+    if data['matchid'].iloc[game * 2] <> data['matchid'].iloc[game * 2 + 1]:
+      raise Exception("Unexpeted match id %d vs %d", (
+                         data['matchid'].iloc[game * 2],
+                         data['matchid'].iloc[game * 2 + 1]))
     t0 = data['team_name'].iloc[game * 2]
     t1 = data['op_team_name'].iloc[game * 2]
+    if 'points' in data.columns: 
+      points.append(data['points'].iloc[game * 2])
     team0.append(t0)
     team1.append(t1)
-  return pd.DataFrame([pd.Series(team0), 
-                       pd.Series(team1),
-                       pd.Series(probs).mul(100)])
+  df =  pd.DataFrame({'team_name': pd.Series(team0), 
+                      'op_team_name': pd.Series(team1),
+                      'predicted': pd.Series(probs).mul(100)},
+                      columns = ['team_name', 'op_team_name', 'predicted'])
+  if len(points) > 0:
+    df['points'] = pd.Series(points)
+  return df
+
 
 def checkData(data):
   """ Walks a dataframe and make sure that all is well. """ 
@@ -619,7 +633,7 @@ def trainModel(data, ignore_cols):
   y = [int(yval) == 3 for yval in y_train]
   X_train2['intercept'] = 1.0
   logit = sm.Logit(y, X_train2, disp=False)
-  model = logit.fit_regularized(maxiter=10240, alpha=8.0, disp=False) 
+  model = logit.fit_regularized(maxiter=10240, alpha=4.0, disp=False) 
   return (model, test)
 
 
@@ -693,8 +707,8 @@ def buildTeamMatrix(data, target_col):
     points = home[target_col] - away[target_col]
 
     # Discount home team's performance.
-    teams[home_id][game] = 0.75 
-    teams[away_id][game] = -1.0
+    teams[home_id][game] = 1.0 - home['is_home'] * .25 
+    teams[away_id][game] = -1.0 + away['is_home'] * .25
     result[game] = points
 
   return pd.DataFrame(teams)
@@ -723,44 +737,49 @@ def buildPower(X, y, coerce_fn, acc=0.0001):
     return 1.0
     
   # Snap power data to rought percentiles.
-  # return params.apply(snap).to_dict()
+  return params.apply(snap).to_dict()
   # return params.apply(lambda val: 0.0 if val < q1 else (.5 if val < q2 else 1.0)).to_dict()
-  return params.to_dict()
+  # return params.to_dict()
 
-def addPower(data, cols):
+def getPowerMap(competition_data, col, coerce_fn):
+  power = {}
+  acc = 0.000001
+  alpha = 5.0
+  # Restrict the number of competitions so that we can make
+  # sure we'll work with WC data.
+  # competition_data = competition_data.iloc[:100]
+  while True:
+    if alpha < 1.0:
+      break;
+    try:
+      teams = buildTeamMatrix(competition_data, col)
+      y = teams[col]
+      del teams[col]
+      competition_power = buildPower(teams, y, coerce_fn, acc)
+      if competition_power is None:
+        alpha /= 2
+        print 'Reducing alpha for %s to %f due lack of dynamic range' % (competition, alpha)
+      else:
+        power.update(competition_power)
+        break
+    except LinAlgError, err:
+      alpha /= 2  
+      print 'Reducing alpha for %s to %f due to error %s' % (competition, alpha, err)
+
+  if alpha < 1.0:
+    print "Skipping power ranking for competition %s column %s" % (
+      competition)
+    return {}
+  return power
+
+def addPower(data, power_train_data, cols):
   data = data.copy()
   competitions = data['competitionid'].unique()
   for (col, coerce_fn, final_name) in cols:
     power = {}
     for competition in competitions:
-      acc = 0.000001
-      alpha = 10.0
-      competition_data = data[data['competitionid'] == competition]
-      # Restrict the number of competitions so that we can make
-      # sure we'll work with WC data.
-      # competition_data = competition_data.iloc[:100]
-      while True:
-        if alpha < 1.0:
-          break;
-        try:
-          teams = buildTeamMatrix(competition_data, col)
-          y = teams[col]
-          del teams[col]
-          competition_power = buildPower(teams, y, coerce_fn, acc)
-          if competition_power is None:
-            alpha /= 2
-            print 'Reducing alpha for %s to %f due lack of dynamic range' % (competition, alpha)
-          else:
-            power.update(competition_power)
-            break
-        except LinAlgError, err:
-          alpha /= 2  
-          print 'Reducing alpha for %s to %f due to error %s' % (competition, alpha, err)
-
-      if alpha < 1.0:
-        print "Skipping power ranking for competition %s column %s" % (
-          competition, final_name)
-        continue
+      competition_data = power_train_data[power_train_data['competitionid'] == competition]
+      power.update(getPowerMap(competition_data, col, coerce_fn))
 
     names = {}
     power_col = pd.Series(np.zeros(len(data)), data.index)
@@ -768,11 +787,10 @@ def addPower(data, cols):
       teamid = str(data.iloc[index]['teamid'])
       # if not teamid in power:
       #  print "Missing power data for %s" % teamid
-      #  power[teamid] = 0.5
-      # names[data.iloc[index]['team_name']] = power[teamid]
+      names[data.iloc[index]['team_name']] = power.get(teamid, 0.5)
       # print "%d: %s -> %s" % (index, teamid, power.get(teamid, 0.5))
       power_col.iloc[index] = power.get(teamid, 0.5)
-    # print ['%s: %0.03f' % (x[0], x[1]) for x in sorted(names.items(), key=(lambda x: x[1]))]
+    print ['%s: %0.03f' % (x[0], x[1]) for x in sorted(names.items(), key=(lambda x: x[1]))]
     data['power_%s' % (final_name)] = power_col
   return data
 

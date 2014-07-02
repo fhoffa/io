@@ -2,10 +2,10 @@ from pandas.io import gbq
 
 touch_table = 'cloude-sandbox:toque.touches'
 match_game_table = 'SELECT * FROM [cloude-sandbox:temp.match_games_with_replacement]'
-match_goals_table = 'SELECT * FROM [cloude-sandbox:temp.match_goals_table_20140623]'
+match_goals_table = 'SELECT * FROM [cloude-sandbox:temp.match_goals_table_20140791_2]'
 
 # Number of games to look at history from:
-history_size = 3
+history_size = 4
 
 # Event type ids:
 pass_id = 1
@@ -87,7 +87,7 @@ raw_goal_and_game_subquery = """
 SELECT  matchid, teamid, goal, game, timestamp,
 FROM (
   SELECT matchid, teamid, 
-    if (typeid == %(goal)d, 1, 0) as goal,      
+    if (typeid == %(goal)d and periodid != 5, 1, 0) as goal,      
     if (typeid == %(game)d, 1, 0) as game,
     eventid,
     timestamp,
@@ -120,6 +120,15 @@ goals.matchid = de.matchid and goals.teamid = de.deduct_team
 )
 """ % (raw_goal_by_game_and_team_subquery, own_goal_credit_subquery, own_goal_credit_subquery)
 
+match_game_with_touches = """
+
+SELECT * FROM (%(match_games)s) 
+WHERE matchid in (
+  SELECT matchid FROM [%(touch_table)s] GROUP BY matchid)
+
+""" % {'match_games': match_game_table,
+       'touch_table': touch_table}
+
 match_history = """
 SELECT h.teamid as teamid, h.matchid as matchid, h.timestamp as timestamp, 
 m1.timestamp as previous_timestamp, m1.matchid as previous_match
@@ -140,6 +149,7 @@ m1.timestamp >= h.tenth_last_match_timestamp AND
 m1.timestamp <= h.last_match_timestamp 
 
 """ % {'history_size': history_size, 
+       'match_games_with_touches': match_game_with_touches,
        'match_games': match_game_table}
         
 
@@ -403,7 +413,7 @@ ON h.matchid = op.matchid and h.op_teamid = op.teamid
 
 wc_history_query = """
 SELECT * FROM (%(history_query)s) WHERE competitionid = 4
-AND timestamp > '2014-01-01 00:00:00.000000'
+--AND timestamp > '2014-01-01 00:00:00.000000'
 """ % {'history_query': history_query,
       }
 
