@@ -1,8 +1,8 @@
 # Raw touch-by-touch BigQuery table. This table contains data licensed from Opta
 # and so cannot be shared widely.
-_touch_table = 'cloude-sandbox:toque.touches'
-# Set the touch table to to use the summary table.
-# _touch_table = None
+# _touch_table = 'cloude-sandbox:toque.touches'
+# Set the touch table to None to use the summary table.
+_touch_table = None
 
 # Table containing games that were played. Allows us to map team ids to team
 # names and figure out which team was home and which team was away.
@@ -276,74 +276,17 @@ FROM (
        'team_game_summary': _team_game_summary,
        'touches_table': _touch_table}
 
-# Combines statistics from both teams in a match.
-# For each two records matching the pattern (m, t1, <stats1>) and 
-# (m, t2, <stats2>) where m is the match id, t1 and t2 are the two teams,
-# stats1 and stats2 are the statistics for those two teams, combines them
-# into a single row (m, t1, t2, <stats1>, <stats2>) where all of the 
-# t2 field names are decorated with the op_ prefix. For example, teamid becomes
-# op_teamid, and pass_70 becomes op_pass_70.
-_team_game_op_summary =  """
-    SELECT cur.matchid as matchid,
-      cur.teamid as teamid,
-      cur.passes as passes,
-      cur.bad_passes as bad_passes,
-      cur.pass_ratio as pass_ratio,
-      cur.corners as corners,
-      cur.fouls as fouls,  
-      cur.cards as cards,
-      cur.goals as goals,
-      cur.shots as shots,
-      cur.is_home as is_home,
-      cur.team_name as team_name,
-      cur.pass_80 as pass_80,
-      cur.pass_70 as pass_70,
-      cur.expected_goals as expected_goals,
-      cur.on_target as on_target,
-      cur.length as length,
-      
-      opp.teamid as op_teamid,
-      opp.passes as op_passes,
-      opp.bad_passes as op_bad_passes,
-      opp.pass_ratio as op_pass_ratio,
-      opp.corners as op_corners,
-      opp.fouls as op_fouls,
-      opp.cards as op_cards, 
-      opp.goals as op_goals,
-      opp.shots as op_shots,
-      opp.team_name as op_team_name,
-      opp.pass_80 as op_pass_80,
-      opp.pass_70 as op_pass_70,
-      opp.expected_goals as op_expected_goals,
-      opp.on_target as op_on_target,
-
-      cur.competitionid as competitionid,
-
-      if (opp.shots > 0, cur.shots / opp.shots, cur.shots * 1.0)
-	  as shots_op_ratio,
-      if (opp.goals > 0, cur.goals / opp.goals, cur.goals * 1.0)
-	  as goals_op_ratio,
-      if (opp.pass_ratio > 0, cur.pass_ratio / opp.pass_ratio, 1.0)
-	  as pass_op_ratio,
-     
-      if (cur.goals > opp.goals, 3,
-	if (cur.goals == opp.goals, 1, 0)) as points,
-      cur.timestamp as timestamp,
-
-    FROM (%(team_game_summary)s) cur
-    JOIN (%(team_game_summary)s) opp 
-    ON cur.matchid = opp.matchid
-    WHERE cur.teamid != opp.teamid
-    ORDER BY cur.matchid, cur.teamid
-      """ % {'team_game_summary': _team_game_summary_corrected}
-
 ###
 ### Public queries / methods
 ###
 
 # Query that returns query statistics for both teams in a game.
-def team_game_op_summary_query(): return _team_game_op_summary
-def team_game_summary_query(): return _team_game_summary_corrected
+def team_game_summary_query(): 
+  if _touch_table:
+    return _team_game_summary_corrected
+  else:
+    return game_summary
+  
 def match_goals_table(): return _match_goals_table
 def match_games_table(): return _match_games_table
 
