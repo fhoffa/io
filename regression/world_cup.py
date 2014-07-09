@@ -34,156 +34,7 @@ from sklearn.linear_model import LogisticRegression
 
 import statsmodels.api as sm
 
-def teamPredict(all_predictions, cnt):
-    """ Given an list of arrays of predictions, where each array is the prediction
-        of a single goal count (goals > k), predict which team will win. 
-    """
-    predictions = []
-    probs = []
-    for game in range(cnt/2):
-        p0 = []
-        p1 = []
-        for (goals, goal_predictions) in all_predictions:
-            p0.append(goal_predictions[game * 2])
-            p1.append(goal_predictions[game * 2 + 1])
-        # Add extra since we only have 3 entries instead of 4
-        p0.append(0.0)
-        p1.append(0.0)
-        
-        p0 = normalize(p0)
-        p1 = normalize(p1)
-        pDraw = (
-            p0[0] * p1[0] + 
-            p0[1] * p1[1] +
-            p0[2] * p1[2] +
-            p0[3] * p1[3] + 
-            p0[4] * p1[4]
-            )
-        pWin = (
-            p1[0] * (p0[1] + p0[2] + p0[3] + p0[4]) +
-            p1[1] * (p0[2] + p0[3] + p0[4]) +
-            p1[2] * (p0[3] + p0[4]) +
-            p1[3] * (p0[4])
-        )
-        pLose = 1.0 - pDraw - pWin
-        probs.append((pWin, pLose, pDraw))
-        if pWin >= pDraw and pWin >= pLose:
-          predictions.append(3)
-        elif pDraw >= pWin and pDraw >= pLose:
-          predictions.append(1)
-        else:
-           predictions.append(0)
-    return (predictions,probs)
-        
-def runTeamPoisson(data, ignore_cols):
-  """ Runs a goal-based prediciton that predicts the probability
-      distribution for goals scored by each team, then predicts the
-      winner based on this. """
-  data = splice(data)
-  # data['goal_diff'] = data['goals'].sub(data['opp_goals'])
-  # target_col = 'goal_diff'
-  target_col = 'goals'
-
-  ignore_cols += ['opp_%s' % (col,) for col in ignore_cols] 
-  
-  (train, test) = split(data)
-  data = prepareData(data.copy())
-  (train, test) = split(data)
-  (y_test, X_test) = extractTarget(test, target_col)
-  (y_train, X_train) = extractTarget(train, target_col)
-  
-  X_train2 = coerceDf(cloneAndDrop(X_train, ignore_cols))    
-  X_test2 = coerceDf(cloneAndDrop(X_test, ignore_cols))
-
-  model = buildModelPoisson(y_train, X_train2)
-  count = len(data[target_col])
-
-  predictions = _predictModel(model, X_test2)
-  base_count = sum(yval > 1 for yval in data[target_col])
-  baseline = base_count * 1.0 / count
-  # validate(1, y_test, predictions, baseline, compute_auc=True)
-  test_team_results = teamTest(y_test)
-  all_team_results = teamTest(data[target_col])
-  team_predictions = teamTest(pd.Series(predictions))
-  team_predictions_prob = teamTestProb(pd.Series(predictions))
-  validate('poisson', 
-           [int(pts) == 3 for pts in test_team_results], 
-           team_predictions_prob,
-           sum([pts == 3 for pts in all_team_results]) * 1.0 / len(all_team_results),
-           compute_auc=True)
-
-  validate('w', 
-           [int(pts) == 3 for pts in test_team_results], 
-           [1.0 if pts == 3 else 0.0 for pts in team_predictions],
-           sum([pts == 3 for pts in all_team_results]) * 1.0 / len(all_team_results))
-  validate('d', 
-           [int(pts) == 1 for pts in test_team_results], 
-           [1.0 if int(pts) == 1 else 0.0 for pts in team_predictions],
-           sum([int(pts) == 1 for pts in all_team_results]) * 1.0 / len(all_team_results))
-  validate('l', 
-           [int(pts) == 0 for pts in test_team_results], 
-           [1.0 if int(pts) == 0 else 0.0 for pts in team_predictions],
-           sum([int(pts) == 0 for pts in all_team_results]) * 1.0 / len(all_team_results))
-
-  print '%s: %s' % (target_col, model.summary())
-  print confusion_matrix(test_team_results, team_predictions)
-
-def runTeam(data, ignore_cols, target_col='goals'):
-  """ Runs a goal-based prediciton that predicts the probability
-      distribution for goals scored by each team, then predicts the
-      winner based on this. """
-  data = prepareData(data.copy())
-  (train, test) = split(data)
-  (y_test, X_test) = extractTarget(test, target_col)
-  (y_train, X_train) = extractTarget(train, target_col)
-  X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols)))    
-  X_test2 = splice(coerceDf(cloneAndDrop(X_test, ignore_cols)))
-
-  models = []
-  for (param, test_f) in [(0, check_eq(0)), 
-                          (1, check_ge(1)), 
-                          (2, check_ge(2)),
-                          (3, check_ge(3))
-                          # (4, check_ge(4))
-                          ]:    
-    y = [test_f(yval) for yval in y_train]
-    features = X_train2.columns
-    models.append((param, test_f, buildModel(y, X_train2[features]), features))
-    
-  count = len(data[target_col])
-
-  all_predictions = []
-  for (param, test_f, model, features) in models:
-    predictions = _predictModel(model, X_test2[features])
-    base_count = sum([test_f(yval) for yval in data[target_col]])
-    baseline = base_count * 1.0 / count
-    y = [test_f(yval) for yval in y_test]
-    validate('goals_%s' % (param,), y, predictions, baseline, compute_auc=True)
-    all_predictions.append((param, predictions))
-    print '%s: %s: %s' % (target_col, param, model.summary())
-
-  (team_predictions, probs) = teamPredict(all_predictions, len(y_test))
-  all_team_results = teamTest(data[target_col])
-  test_team_results = teamTest(y_test)
-
-  validate('w', 
-           [int(pts) == 3 for pts in test_team_results], 
-           [1.0 if pts == 3 else 0.0 for pts in team_predictions],
-           sum([pts == 3 for pts in all_team_results]) * 1.0 / len(all_team_results))
-  validate('d', 
-           [int(pts) == 1 for pts in test_team_results], 
-           [1.0 if int(pts) == 1 else 0.0 for pts in team_predictions],
-           sum([int(pts) == 1 for pts in all_team_results]) * 1.0 / len(all_team_results))
-  validate('l', 
-           [int(pts) == 0 for pts in test_team_results], 
-           [1.0 if int(pts) == 0 else 0.0 for pts in team_predictions],
-           sum([int(pts) == 0 for pts in all_team_results]) * 1.0 / len(all_team_results))
-  zips = zip(team_predictions, test_team_results)
-  correct = sum([int(pred) == int(res) for (pred, res) in zips])
-  print "Pct correct = %d/%d=%g" % (correct, len(zips), correct * 1.0 / len(zips))
-  print confusion_matrix(test_team_results, team_predictions)
-
-def dropUnbalancedMatches(data):
+def _dropUnbalancedMatches(data):
   """  Because we don't have data on both teams during a match, we want
        to drop any match we don't have info about both teams. This can happen
        if we have fewer than 10 previous games from a particular team.
@@ -211,7 +62,7 @@ def dropUnbalancedMatches(data):
   while len(keep) < len(data): keep.append(False)
   return data[keep]
 
-def swapPairwise(col):
+def _swapPairwise(col):
   """ Swap rows pairwise; i.e. swap row 0 and 1, 2 and 3, etc.  """
   col = pd.np.array(col)
   for ii in xrange(0, len(col), 2):
@@ -220,13 +71,13 @@ def swapPairwise(col):
     col[ii+1] = val
   return col
 
-def splice(data):
+def _splice(data):
   """ Splice both rows representing a game into a single one. """
   data = data.copy()
   opp = data.copy()
   opp_cols = ['opp_%s' % (col,) for col in opp.columns]
   opp.columns = opp_cols
-  opp = opp.apply(swapPairwise)
+  opp = opp.apply(_swapPairwise)
   del opp['opp_is_home']
   
   return data.join(opp)
@@ -253,7 +104,7 @@ def split(data, test_proportion=0.4):
     raise "Unexpected test length"
   return (train, test)
 
-def extractTarget(data, target_col):
+def _extractTarget(data, target_col):
   """ Removes the target column from a data frame, returns the target col
       and a new data frame minus the target. """
   y = data[target_col]
@@ -261,8 +112,8 @@ def extractTarget(data, target_col):
   del train_df[target_col]
   return y, train_df
 
-def check_ge(n): return lambda (x): int(x) >= int(n)
-def check_eq(n): return lambda (x): int(x) == int(n)
+def _check_ge(n): return lambda (x): int(x) >= int(n)
+def _check_eq(n): return lambda (x): int(x) == int(n)
 
 def buildModelPoisson(y, X, acc=0.0000001):
   X = X.copy()
@@ -271,10 +122,10 @@ def buildModelPoisson(y, X, acc=0.0000001):
   return logit.fit_regularized(maxiter=10240, alpha=4.0, acc=acc)
 
 l1_alpha = 16.0
-def buildModel(y, X, acc=0.0000001, alpha=l1_alpha):
+def buildModel(y, X, acc=None, alpha=l1_alpha):
   X = X.copy()
   X['intercept'] = 1.0
-  logit = sm.Logit(y, X)
+  logit = sm.Logit(y, X, disp=False)
   return logit.fit_regularized(maxiter=10240, alpha=alpha, acc=acc, disp=False)
 
 def buildModelMn(y, X, acc=0.0000001, alpha=l1_alpha):
@@ -298,7 +149,7 @@ def classify(probabilities, proportions, levels=None):
   label_index = 0
   split_indexes = []
   split_start = 0.0
-  proportions = normalize(proportions)
+  proportions = _normalize(proportions)
   for proportion in proportions:
     split_start += proportion * len(probabilities)
     split_indexes.append(split_start)
@@ -399,16 +250,16 @@ def validate(k, y, predictions, baseline=0.5, compute_auc=False, quiet=True):
       fp, fn, tp, tn, p, n, len(y))
   # roc_data.plot()
   
-def coerceTypes(vals):
+def _coerceTypes(vals):
   """ Makes sure all of the values in a list are floats. """
   first_type = None
   return [1.0 * val for val in vals]
 
-def coerceDf(df): 
+def _coerceDf(df): 
   """ Coerces a dataframe to all floats, and standardizes the values. """
-  return standardize(df.apply(coerceTypes))
+  return _standardize(df.apply(_coerceTypes))
 
-def standardizeCol(col):
+def _standardizeCol(col):
   """ Standardizes a single column (subtracts mean and divides by std dev). """
   std = np.std(col)
   mean = np.mean(col)
@@ -417,24 +268,23 @@ def standardizeCol(col):
   else:
     return col
 
-def standardize(df):
+def _standardize(df):
    """ Standardizes a dataframe. All fields must be numeric. """
-   return df.apply(standardizeCol)
+   return df.apply(_standardizeCol)
 
-def cloneAndDrop(data, drop_cols):
+def _cloneAndDrop(data, drop_cols):
   """ Returns a copy of a dataframe that doesn't have certain columns. """
   clone = data.copy()
   for col in drop_cols:
     if col in clone.columns:
       del clone[col]
-  # print "Remaining: %s" % (clone.columns,)
   return clone
 
-def normalize(vec):
+def _normalize(vec):
     total = float(sum(vec))
     return [val / total for val in vec]
 
-def games(df):
+def _games(df):
   """ Drops odd numbered rows in a column. This is used when we
       have two rows representing a game, and we only need 1. """
   return df[[idx % 2 == 0 for idx in xrange(len(df))]] 
@@ -497,7 +347,6 @@ def extractPredictions(data, predictions):
     df['points'] = pd.Series(points)
   return df
 
-
 def checkData(data):
   """ Walks a dataframe and make sure that all is well. """ 
   i = 0
@@ -536,6 +385,14 @@ def teamGamePredictNoDraw(all_predictions, cnt):
     predictions.append(dW)
   return predictions
 
+def prepareData(data):
+  """ Drops all matches where we don't have data for both teams. """
+  
+  data = data.copy()
+  data = _dropUnbalancedMatches(data)
+  checkData(data)
+  return data
+
 def runGameNoDraw(data, ignore_cols, target_col='points'):
   """ Builds and tests a model that:
       1. Given an input dataframe that has:
@@ -564,12 +421,12 @@ def runGameNoDraw(data, ignore_cols, target_col='points'):
   # we don't want to train on them.
   train = train.loc[train[target_col] <> 1]
 
-  (y_test, X_test) = extractTarget(test, target_col)
-  (y_train, X_train) = extractTarget(train, target_col)
-  X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols))) 
-  X_test2 = splice(coerceDf(cloneAndDrop(X_test, ignore_cols)))
+  (y_test, X_test) = _extractTarget(test, target_col)
+  (y_train, X_train) = _extractTarget(train, target_col)
+  X_train2 = _splice(_coerceDf(_cloneAndDrop(X_train, ignore_cols))) 
+  X_test2 = _splice(_coerceDf(_cloneAndDrop(X_test, ignore_cols)))
 
-  (param, test_f) = (3, check_eq(3)) 
+  (param, test_f) = (3, _check_eq(3)) 
   y = [test_f(yval) for yval in y_train]
   features = X_train2.columns
   model = buildModel(y, X_train2[features])
@@ -609,7 +466,7 @@ def runGameNoDraw(data, ignore_cols, target_col='points'):
             lose_count * 1.0 / len(all_team_results))
   print "W/L/D %d/%d/%s" % (win_count, lose_count, draw_count)
   # X_train['predicted'] = predicted
-  X_test_games = games(X_train)
+  X_test_games = _games(X_train)
   # zips = zip(predicted, test_team_results)
   # correct = sum([int(pred) == int(res) for (pred, res) in zips])
   # print confusion_matrix(test_team_results, predicted)
@@ -626,21 +483,18 @@ def trainModel(data, ignore_cols):
   data = prepareData(data).dropna()
   target_col = 'points'
   (train, test) = split(data)
-  (y_test, X_test) = extractTarget(test, target_col)
-  (y_train, X_train) = extractTarget(train, target_col)
-  X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols)))
+  (y_test, X_test) = _extractTarget(test, target_col)
+  (y_train, X_train) = _extractTarget(train, target_col)
+  X_train2 = _splice(_coerceDf(_cloneAndDrop(X_train, ignore_cols)))
 
   y = [int(yval) == 3 for yval in y_train]
-  X_train2['intercept'] = 1.0
-  logit = sm.Logit(y, X_train2, disp=False)
-  model = logit.fit_regularized(maxiter=10240, alpha=4.0, disp=False) 
+  model = buildModel(y, X_train2, alpha=4.0)
   return (model, test)
-
 
 def predictModel(model, test, ignore_cols):
   """ Runs a simple predictor that will predict if we expect a team to win. """
     
-  X_test2 = splice(coerceDf(cloneAndDrop(test, ignore_cols)))
+  X_test2 = _splice(_coerceDf(_cloneAndDrop(test, ignore_cols)))
   X_test2['intercept'] = 1.0
   predicted =  model.predict(X_test2)
   result = test.copy()
@@ -651,9 +505,9 @@ def validatePredictions(predictions, base_count):
 
   count = len(data[target_col])
 
-  base_count = sum([check_eq(3)(yval) for yval in data[target_col]])
+  base_count = sum([_check_eq(3)(yval) for yval in data[target_col]])
   baseline = base_count * 1.0 / count
-  y = [check_eq(3)(yval) for yval in y_test]
+  y = [_check_eq(3)(yval) for yval in y_test]
   validate(3, y, predictions, baseline, compute_auc=True)
   print model.summary()
   grounded_predictions = [prediction > 0.50 for prediction in predictions]
@@ -667,260 +521,24 @@ def runSimple(data, ignore_cols):
   data = prepareData(data)
   target_col = 'points'
   (train, test) = split(data)
-  (y_test, X_test) = extractTarget(test, target_col)
-  (y_train, X_train) = extractTarget(train, target_col)
-  X_train2 = splice(coerceDf(cloneAndDrop(X_train, ignore_cols)))   
-  X_test2 = splice(coerceDf(cloneAndDrop(X_test, ignore_cols)))
+  (y_test, X_test) = _extractTarget(test, target_col)
+  (y_train, X_train) = _extractTarget(train, target_col)
+  X_train2 = _splice(_coerceDf(_cloneAndDrop(X_train, ignore_cols)))   
+  X_test2 = _splice(_coerceDf(_cloneAndDrop(X_test, ignore_cols)))
 
-  y = [check_eq(3)(yval) for yval in y_train]
+  y = [_check_eq(3)(yval) for yval in y_train]
   features = X_train2.columns
   model = buildModel(y, X_train2[features])
     
   count = len(data[target_col])
 
   predictions = _predictModel(model, X_test2[features])
-  base_count = sum([check_eq(3)(yval) for yval in data[target_col]])
+  base_count = sum([_check_eq(3)(yval) for yval in data[target_col]])
   baseline = base_count * 1.0 / count
-  y = [check_eq(3)(yval) for yval in y_test]
+  y = [_check_eq(3)(yval) for yval in y_test]
   validate(3, y, predictions, baseline, compute_auc=True)
   print model.summary()
   grounded_predictions = [prediction > 0.50 for prediction in predictions]
   print confusion_matrix(y, grounded_predictions)
   print zip(X_test['team_name'],X_test['op_team_name'], X_test['matchid'], 
             grounded_predictions, data[target_col])
-
-def buildTeamMatrix(data, target_col):
-  teams = {}
-  n = len(data) / 2
-  for teamid in data['teamid']:
-    teams[str(teamid)] = pd.Series(np.zeros(n))
-
-  result = pd.Series(np.empty(n))
-  teams[target_col] = result
-
-  for game in xrange(n):
-    home = data.iloc[game * 2]
-    away = data.iloc[game * 2 + 1]
-
-    home_id = str(home['teamid'])
-    away_id = str(away['teamid'])
-    points = home[target_col] - away[target_col]
-
-    # Discount home team's performance.
-    teams[home_id][game] = 1.0 - home['is_home'] * .25 
-    teams[away_id][game] = -1.0 + away['is_home'] * .25
-    result[game] = points
-
-  return pd.DataFrame(teams)
-
-def buildPower(X, y, coerce_fn, acc=0.0001):
-  y = pd.Series([coerce_fn(val) for val in y])
-  model = buildModel(y, X, acc=acc, alpha=1.0)
-
-  # print model.summary()
-  params = np.exp(model.params)
-  del params['intercept']
-  params = params[params <> 1.0]
-  max_param = params.max()
-  min_param = params.min()
-  range = max_param - min_param
-  if len(params) == 0 or range < 0.0001:
-    return None
-  
-  # return standardizeCol(params).to_dict()
-  params = params.sub(min_param)
-  params = params.div(range)
-  qqs = np.percentile(params, [25, 50, 75])
-  def snap(val): 
-    for ii in xrange(len(qqs)):
-      if (qqs[ii] > val): return ii * 0.33
-    return 1.0
-    
-  # Snap power data to rought percentiles.
-  return params.apply(snap).to_dict()
-  # return params.apply(lambda val: 0.0 if val < q1 else (.5 if val < q2 else 1.0)).to_dict()
-  # return params.to_dict()
-
-def getPowerMap(competition_data, col, coerce_fn):
-  power = {}
-  acc = 0.000001
-  alpha = 5.0
-  # Restrict the number of competitions so that we can make
-  # sure we'll work with WC data.
-  # competition_data = competition_data.iloc[:100]
-  while True:
-    if alpha < 1.0:
-      break;
-    try:
-      teams = buildTeamMatrix(competition_data, col)
-      y = teams[col]
-      del teams[col]
-      competition_power = buildPower(teams, y, coerce_fn, acc)
-      if competition_power is None:
-        alpha /= 2
-        print 'Reducing alpha for %s to %f due lack of dynamic range' % (competition, alpha)
-      else:
-        power.update(competition_power)
-        break
-    except LinAlgError, err:
-      alpha /= 2  
-      print 'Reducing alpha for %s to %f due to error %s' % (competition, alpha, err)
-
-  if alpha < 1.0:
-    print "Skipping power ranking for competition %s column %s" % (
-      competition)
-    return {}
-  return power
-
-def addPower(data, power_train_data, cols):
-  data = data.copy()
-  competitions = data['competitionid'].unique()
-  for (col, coerce_fn, final_name) in cols:
-    power = {}
-    for competition in competitions:
-      competition_data = power_train_data[power_train_data['competitionid'] == competition]
-      power.update(getPowerMap(competition_data, col, coerce_fn))
-
-    names = {}
-    power_col = pd.Series(np.zeros(len(data)), data.index)
-    for index in xrange(len(data)):
-      teamid = str(data.iloc[index]['teamid'])
-      # if not teamid in power:
-      #  print "Missing power data for %s" % teamid
-      names[data.iloc[index]['team_name']] = power.get(teamid, 0.5)
-      # print "%d: %s -> %s" % (index, teamid, power.get(teamid, 0.5))
-      power_col.iloc[index] = power.get(teamid, 0.5)
-    print ['%s: %0.03f' % (x[0], x[1]) for x in sorted(names.items(), key=(lambda x: x[1]))]
-    data['power_%s' % (final_name)] = power_col
-  return data
-
-def prepareData(data):
-  """ Drops all matches where we don't have data for both teams. """
-  
-  data = data.copy()
-  data = dropUnbalancedMatches(data)
-  checkData(data)
-  return data
-
-
-def knownWinners(names): 
-  """ Known winners of games """
-  winners = {
-    '1A': 'Brazil',
-    '2A': 'Mexico',
-    '1B': 'Netherlands',
-    '2B': 'Chile',
-
-    # FAKE DATA FROM HERE:
-    '1C': 'Colombia',
-    '2C': "Cote D'Ivoire",
-    '1D': 'Costa Rica',
-    '2D': 'Italy',
-    '1E': 'France',
-    '2E': 'Ecuador',
-    '1F': 'Argentina',
-    '2F': 'Nigeria',
-    '1G': 'Germany',
-    '2G': 'United States',
-    '1H': 'Belgium',
-    '2H': 'Algeria'
-    }
-  return winners
-
-def buildBracket():
-  return {
-      # Round of 16
-      '16_1': ('1A', '2B'),
-      '16_2': ('1C', '2D'),
-      '16_3': ('2A', '1B'),
-      '16_4': ('2C', '1D'),
-      '16_5': ('1E', '2F'),
-      '16_6': ('1G', '2H'),
-      '16_7': ('2E', '1F'),
-      '16_8': ('2G', '1G'),
-
-      # Quarters
-      'q_1': ('16_1', '16_2'),
-      'q_2': ('16_5', '16_6'),
-      'q_3': ('16_3', '16_4'),
-      'q_4': ('16_7', '16_8'),
- 
-      # Semis
-      's_1': ('q_1', 'q_2'),
-      's_2': ('q_3', 'q_4'),
- 
-      # Final
-      'f_1': ('s_1', 's_2'),
-      }
-  
-def predictWinner(t1, t2, sim_f):
-    if t1 is None: return t2
-    elif t2 is None: return t1
-    else: return sim_f(t1, t2)
-
-def knockoutSim(groups, sim_f):
-  brackets = buildBrackets()
-  winners = groups.copy()
-  progress = len(winners)
-  while progress:
-    print 'Simulating %d games in this round' % (progress,)
-
-    progress = 0
-    for (game, (t1, t2)) in brackets.items():
-      if not game in winners:
-        winners[game] = predictWinner(winners.get(t1, None), 
-                                      winners.get(t2, None))
-        if game in winners:
-          progress += 1
-
-  return winners
-
-def wcPower(wc_data):
-  # Tweak the world cup data to update values like home field advantage.
-  wc_power = pd.read_csv('wc_power.csv')
-
-  # Scale power rankings to the range [0,1]
-  wc_power['power_ranking'] = wc_power['power_ranking'].sub(
-      wc_power['power_ranking'].min())
-  wc_power['power_ranking'] = wc_power['power_ranking'].div(
-      wc_power['power_ranking'].max())
-
-  overrides = {}
-  home_override = {}
-  for ii in xrange(len(wc_power)):
-      row = wc_power.iloc[ii]
-      overrides[row['teamid']] = (row['power_ranking'],
-                                  row['is_home'])
-
-  wc_data['power_wins'] = pd.Series(np.zeros(len(wc_data)))
-  for ii in xrange(len(wc_data)):
-      row = wc_data.iloc[ii]
-      team = row['teamid']
-      if team in overrides:
-          (new_power, new_home) = overrides[team]
-          row['power_wins'] = new_power
-          row['is_home'] = new_home
-      else:
-          # If we don't know, assume middling.
-          row['power_wins'] = 0.5
-
-def buildWcData(data):
-
-  wc_dict = {}
-  
-  for ii in xrange(len(data)):
-    row = wc_data.iloc[ii]
-    team = row['teamid']
-    # if not team in 
-
-def makeSim(model, data):
-  # Data should be a datframe with best knowledge about wc teams, one row
-  # per team
-  def sim_f(t1, t2):
-    df = data[data['teamid'] in [t1, t2]]
-    to_predict = splice(coerceDf(cloneAndDrop(df, ignore_cols)))
-    predictions = _predictModel(model, to_predict)
-    print predictions
-    return predictions[t1] > 0.5
-    
-  return sim_f
