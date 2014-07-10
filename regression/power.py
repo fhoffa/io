@@ -28,17 +28,25 @@ def buildTeamMatrix(data, target_col):
   result = pd.Series(np.empty(n))
   teams[target_col] = result
 
+  current_season = None
+  current_discount = 1.0
+
   for game in xrange(n):
     home = data.iloc[game * 2]
     away = data.iloc[game * 2 + 1]
+    if home['seasonid'] <> current_season:
+      # Discount older seasons.
+      current_season = home['seasonid']
+      current_discount *= 0.9
+      print "New season %s" % (current_season,)
 
     home_id = str(home['teamid'])
     away_id = str(away['teamid'])
     points = home[target_col] - away[target_col]
 
     # Discount home team's performance.
-    teams[home_id][game] = 1.0 - home['is_home'] * .25 
-    teams[away_id][game] = -1.0 + away['is_home'] * .25
+    teams[home_id][game] = (1.0 - home['is_home'] * .25) * current_discount
+    teams[away_id][game] = (-1.0 + away['is_home'] * .25) * current_discount
     result[game] = points
 
   return pd.DataFrame(teams)

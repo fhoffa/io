@@ -188,6 +188,7 @@ g.goals as goals,
 h.is_home as is_home,
 h.team_name as team_name,
 h.competitionid as competitionid,
+h.seasonid as seasonid,
 if (x.xG is not null, x.xG, 0.0) as expected_goals,
 if (x.sot is not null, INTEGER(x.sot), INTEGER(0)) / t.length as on_target,
 t.length as length
@@ -259,6 +260,7 @@ t.goals / s.event_count as goals,
 t.is_home as is_home,
 t.team_name as team_name,
 t.competitionid as competitionid,
+t.seasonid as seasonid,
 t.expected_goals / s.event_count as expected_goals,
 t.on_target / s.event_count as on_target,
 t.length as length,
@@ -297,7 +299,7 @@ def match_games_table(): return _match_games_table
 # we don't want to use information about the current game to predict that
 # same game.
 def get_non_feature_columns():
-  return ['teamid', 'op_teamid', 'matchid', 'competitionid',
+  return ['teamid', 'op_teamid', 'matchid', 'competitionid', 'seasonid',
           'goals', 'op_goals', 'points', 'timestamp', 'team_name', 
           'op_team_name']
 

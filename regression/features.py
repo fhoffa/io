@@ -18,7 +18,7 @@ match_game_with_stats = """
 # into a single row (m, t1, t2, <stats1>, <stats2>) where all of the
 # t2 field names are decorated with the op_ prefix. For example, teamid becomes
 # op_teamid, and pass_70 becomes op_pass_70.
-team_game_op_summary =  """
+_team_game_op_summary =  """
     SELECT cur.matchid as matchid,
       cur.teamid as teamid,
       cur.passes as passes,
@@ -53,6 +53,7 @@ team_game_op_summary =  """
       opp.on_target as op_on_target,
 
       cur.competitionid as competitionid,
+      cur.seasonid as seasonid,
 
       if (opp.shots > 0, cur.shots / opp.shots, cur.shots * 1.0)
           as shots_op_ratio,
@@ -119,6 +120,7 @@ def get_history_query(history_size):
       pts.teamid as teamid,
       pts.op_teamid as op_teamid,
       pts.competitionid as competitionid,
+      pts.seasonid as seasonid,
       pts.is_home as is_home,
       pts.team_name as team_name,
       pts.op_team_name as op_team_name,
@@ -193,7 +195,7 @@ def get_history_query(history_size):
       and summary.teamid = pts.teamid
       WHERE summary.matchid <> '442291'
       ORDER BY matchid, is_home DESC
-      """ % {'team_game_op_summary': team_game_op_summary,
+      """ % {'team_game_op_summary': _team_game_op_summary,
        'match_games': match_stats.match_games_table(),
        'match_history': get_match_history(history_size)}
 
@@ -210,6 +212,7 @@ def get_history_query_with_goals(history_size):
       h.teamid as teamid,
       h.op_teamid as op_teamid,
       h.competitionid as competitionid,
+      h.seasonid as seasonid,
       h.is_home as is_home,
       h.team_name as team_name,
       h.op_team_name as op_team_name,
@@ -254,6 +257,7 @@ def get_history_query_with_goals(history_size):
       ON h.matchid = g.matchid and h.teamid = g.teamid
       JOIN (%(match_goals)s) op
       ON h.matchid = op.matchid and h.op_teamid = op.teamid
+      ORDER BY timestamp DESC, matchid, is_home 
       """ % {'history_query': get_history_query(history_size),
 	     'match_goals': match_stats.match_goals_table()}
 
@@ -262,6 +266,7 @@ def get_history_query_with_goals(history_size):
 def get_wc_history_query(history_size): 
   return """
       SELECT * FROM (%(history_query)s) WHERE competitionid = 4
+      ORDER BY timestamp DESC, matchid, is_home 
       """ % {'history_query': get_history_query(history_size)}
 
 # Runs a bigquery query that gets the features that can be used
@@ -274,6 +279,13 @@ def get_wc_features(history_size):
 def get_features(history_size):
   return gbq.read_gbq(get_history_query_with_goals(history_size))
 
+# Runs a BigQuery Query that gets game summaries.
+def get_game_summaries():
+  return gbq.read_gbq("""
+      SELECT * FROM (%(team_game_op_summary)s) 
+      ORDER BY timestamp DESC, matchid, is_home 
+      """ % {'team_game_op_summary': _team_game_op_summary})
+
 # Returns a list of the columns that are in our features dataframe that
 # should not be used in prediction. These are essentially either metadata
 # columns (team name, for example), or potential target variables that
@@ -281,7 +293,7 @@ def get_features(history_size):
 # we don't want to use information about the current game to predict that
 # same game.
 def get_non_feature_columns():
-  return ['teamid', 'op_teamid', 'matchid', 'competitionid',
+  return ['teamid', 'op_teamid', 'matchid', 'competitionid', 'seasonid',
           'goals', 'op_goals', 'points', 'timestamp', 'team_name', 
           'op_team_name']
 
