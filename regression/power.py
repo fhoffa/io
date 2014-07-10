@@ -45,8 +45,8 @@ def buildTeamMatrix(data, target_col):
     points = home[target_col] - away[target_col]
 
     # Discount home team's performance.
-    teams[home_id][game] = (1.0 - home['is_home'] * .25) * current_discount
-    teams[away_id][game] = (-1.0 + away['is_home'] * .25) * current_discount
+    teams[home_id][game] = (1.0 + home['is_home'] * .25) / current_discount
+    teams[away_id][game] = (-1.0 - away['is_home'] * .25) / current_discount
     result[game] = points
 
   return pd.DataFrame(teams)
@@ -75,7 +75,7 @@ def buildPower(X, y, coerce_fn, acc=0.0001, alpha=1.0):
     return 1.0
     
   # Snap power data to rought percentiles.
-  # return params.apply(snap).to_dict()
+  return params.apply(snap).to_dict()
   # return params.apply(lambda val: 0.0 if val < q1 else (.5 if val < q2 else 1.0)).to_dict()
   return params.to_dict()
 
