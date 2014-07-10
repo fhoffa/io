@@ -69,7 +69,8 @@ def _build_power(games, outcomes, coerce_fn, acc=0.0001, alpha=1.0, snap=True):
         rating and we don't want to get a false specificity.
     """
     outcomes = pd.Series([coerce_fn(val) for val in outcomes])
-    model = world_cup.buildModel(outcomes, games, acc=acc, alpha=alpha)
+    model = world_cup.build_model_logistic(outcomes, games, 
+        acc=acc, alpha=alpha)
 
     # print model.summary()
     params = np.exp(model.params)
@@ -83,12 +84,12 @@ def _build_power(games, outcomes, coerce_fn, acc=0.0001, alpha=1.0, snap=True):
     
     params = params.sub(min_param)
     params = params.div(param_range)
-    qqs = np.percentile(params, [25, 50, 75])
+    qqs = np.percentile(params, [20, 40, 60, 80])
     def _snap(val): 
         """ Snaps a value to a quartile. """
         for idx in xrange(len(qqs)):
             if (qqs[idx] > val):
-                return idx * 0.33
+                return idx * 0.25
         return 1.0
       
     if snap:
