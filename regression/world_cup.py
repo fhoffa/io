@@ -220,9 +220,11 @@ def _coerce_types(vals):
     first_type = None
     return [1.0 * val for val in vals]
 
+
 def _coerce(df): 
     """ Coerces a dataframe to all floats, and standardizes the values. """
     return _standardize(df.apply(_coerce_types))
+
 
 def _standardize_col(col):
     """ Standardizes a single column (subtracts mean and divides by std dev). """
@@ -233,9 +235,11 @@ def _standardize_col(col):
     else:
         return col
 
+
 def _standardize(df):
    """ Standardizes a dataframe. All fields must be numeric. """
    return df.apply(_standardize_col)
+
 
 def _clone_and_drop(data, drop_cols):
     """ Returns a copy of a dataframe that doesn't have certain columns. """
@@ -244,6 +248,7 @@ def _clone_and_drop(data, drop_cols):
         if col in clone.columns:
             del clone[col]
     return clone
+
 
 def _normalize(vec):
     total = float(sum(vec))
@@ -257,15 +262,13 @@ def _games(df):
   
 
 def _team_test_prob(y):
-    """ Since we predict a game both ways -- probability that team a
-        beats team b and probability that team b beats team a -- this
-        combines those predictions into a single predicted outcome.
+    """ Takes only every other value, since we have already predicted
+        the game in both directions.
     """
     results = []
     for game in range(len(y)/2):
         g0 = float(y.iloc[game * 2])
-        g1 = float(y.iloc[game * 2 + 1])
-        results.append(g0/(g0+g1))
+        results.append(g0)
     return results
 
 
