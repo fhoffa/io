@@ -1,6 +1,5 @@
 """
     Predicts soccer outcomes using logistic regression.
-
 """
 
 import numpy as np
@@ -125,35 +124,6 @@ def buildModelMn(y, X, acc=0.0000001, alpha=l1_alpha):
   logit = sm.MNLogit(y, X)
   return logit.fit_regularized(maxiter=10240, alpha=alpha, acc=acc, disp=False)
 
-def classify(probabilities, proportions, levels=None):
-  """ Given predicted probabilities and a vector of proportions,
-      assign the samples to categories (defined in the levels vector,
-      or True/False if a levels vector is not provided). The proportions
-      vector decides how many of each category we expect (we'll use
-      the most likely values)
-  """
-
-  if not levels: levels = [False, True]
-  zipped = zip(probabilities, range(len(probabilities)))
-  zipped = sorted(zipped, key=lambda tup: tup[0])
-  predictions = []
-  label_index = 0
-  split_indexes = []
-  split_start = 0.0
-  proportions = _normalize(proportions)
-  for proportion in proportions:
-    split_start += proportion * len(probabilities)
-    split_indexes.append(split_start)
-
-  for i in xrange(len(zipped)):
-    (prob, initial_index) = zipped[i]
-    while i > split_indexes[label_index]: label_index += 1
-    predicted = levels[label_index]
-    predictions.append((prob, predicted, initial_index))
-  
-  predictions.sort(key=lambda tup: tup[2]) 
-  _, results, _ = zip(*predictions)
-  return results
 
 def validate(k, y, predictions, baseline=0.5, compute_auc=False, quiet=True):
   """ Validates binary predictions, computes confusion matrix and AUC.
@@ -280,25 +250,7 @@ def _games(df):
       have two rows representing a game, and we only need 1. """
   return df[[idx % 2 == 0 for idx in xrange(len(df))]] 
   
-def teamTest(y):
-  """ Given a vector containing the number of goals scored in a game
-      where y[k] (where k % 2 = 0) is the number of goals scored by
-      the home team and y[k+1] is the number of goals scored by the
-      away team, return a vector of length (len(y) / 2) that returns
-      the number of points (3 for win, 1 for draw, 0 for loss) that
-      the home team (the kth value) gets.
-  """ 
-
-  results = []
-  for game in xrange(len(y)/2):
-    g0 = int(y.iloc[game * 2])
-    g1 = int(y.iloc[game * 2 + 1])
-    if g0 > g1: results.append(3)
-    elif g0 == g1: results.append(1)
-    else: results.append(0)
-  return results
-
-def teamTestProb(y):
+def _teamTestProb(y):
   results = []
   for game in range(len(y)/2):
     g0 = float(y.iloc[game * 2])
@@ -306,16 +258,9 @@ def teamTestProb(y):
     results.append(g0/(g0+g1))
   return results
 
-def teamTestProbOld(y):
-  results = []
-  for game in xrange(len(y)/2):
-    g0 = int(y.iloc[game * 2])
-    g1 = int(y.iloc[game * 2 + 1])
-    results.append(g0-g1)
-  return results
 
 def extractPredictions(data, predictions):
-  probs = teamTestProb(predictions)
+  probs = _teamTestProb(predictions)
   team0 = []
   team1 = []
   points = []
@@ -360,21 +305,6 @@ def checkData(data):
                       op_teams.iloc[i]))
     i += 2
 
-def teamGamePredictNoDraw(all_predictions, cnt):
-  """ Given a vector of predictions where the 
-      kth prediction is the home team an the  k+1th prediction is
-      the away team (where k % 2 == 0), return a vector of
-      predictions containing the difference between home team win
-      probability and away team win probability.
-  """
-        
-  predictions = []
-  for game in range(cnt/2):
-    pW0 = all_predictions[game * 2]
-    pW1 = all_predictions[game * 2 + 1]
-    dW = pW0 - pW1
-    predictions.append(dW)
-  return predictions
 
 def prepareData(data):
   """ Drops all matches where we don't have data for both teams. """
@@ -384,90 +314,12 @@ def prepareData(data):
   checkData(data)
   return data
 
-def runGameNoDraw(data, ignore_cols, target_col='points'):
-  """ Builds and tests a model that:
-      1. Given an input dataframe that has:
-         <<Game a, Home team, Features>,
-          <Game a, Away team, Features>,
-          <Game b, Home team, Features>,
-          <Game b, Away team, Features>>
-         Copies features from Away team to home team's records with a mangled name,
-         and copies features from Home team to Away team's records. This allows
-         prediction based on statistics about both teams.
-          
-      2. Builds a model predicting outcome (win, loss) over games that
-         did not end in draw. These are the 'strong signal' games.
-      3. Builds outcome by taking the difference in probability that the
-         home team will win and the probability that the away team will win
-         and maps those probabilities to outcomes based on prior probabilites
-         for win, loss, draw. That is, if we know that 50% of games are won by
-         the home team, 20% are draws, and 30 are wone by the away team, we'll
-         mark our most certain 50% as wins, the next 20% as draws, and the
-         final 30% as losses.      
-  """
-  
-  data = prepareData(data)
-  (train, test) = split(data)
-  # Drop draws in the training set; they're not strong signals, so
-  # we don't want to train on them.
-  train = train.loc[train[target_col] <> 1]
-
-  (y_test, X_test) = _extractTarget(test, target_col)
-  (y_train, X_train) = _extractTarget(train, target_col)
-  X_train2 = _splice(_coerceDf(_cloneAndDrop(X_train, ignore_cols))) 
-  X_test2 = _splice(_coerceDf(_cloneAndDrop(X_test, ignore_cols)))
-
-  (param, test_f) = (3, _check_eq(3)) 
-  y = [test_f(yval) for yval in y_train]
-  features = X_train2.columns
-  model = buildModel(y, X_train2[features])
-  print '%s: %s: %s' % (target_col, param, model.summary())
-    
-  count = len(data[target_col])
-
-  print X_test2[features]
-  predictions = _predictModel(model, X_test2[features])
-  base_count = sum([test_f(yval) for yval in data[target_col]])
-  baseline = base_count * 1.0 / count
-  # print "Count: %d / Baseline %f" % (base_count, baseline)
-
-  y = [test_f(yval) for yval in y_test]
-  validate('points_%s' % (param,), y, predictions, baseline, compute_auc=True)
-    
-  probabilities = teamGamePredictNoDraw(predictions, len(y_test))
-  all_team_results = teamTest(data['points'])
-  test_team_results = teamTest(y_test)
-
-  lose_count = sum([pts == 0 for pts in all_team_results])
-  draw_count = sum([pts == 1 for pts in all_team_results])
-  win_count = sum([pts == 3 for pts in all_team_results])
-  predicted = classify(probabilities, [lose_count, draw_count, win_count],
-    [0, 1, 3])
-  validate('w', 
-           [pts == 3 for pts in test_team_results], 
-           [1.0 if cl == 3 else 0.0 for cl in predicted],
-            win_count * 1.0 / len(all_team_results))
-  validate('d', 
-           [int(pts) == 1 for pts in test_team_results], 
-           [1.0 if cl == 1 else 0.0 for cl in predicted],
-            draw_count * 1.0 / len(all_team_results))
-  validate('l', 
-           [int(pts) == 0 for pts in test_team_results], 
-           [1.0 if cl == 0 else 0.0 for cl in predicted],
-            lose_count * 1.0 / len(all_team_results))
-  print "W/L/D %d/%d/%s" % (win_count, lose_count, draw_count)
-  # X_train['predicted'] = predicted
-  X_test_games = _games(X_train)
-  # zips = zip(predicted, test_team_results)
-  # correct = sum([int(pred) == int(res) for (pred, res) in zips])
-  # print confusion_matrix(test_team_results, predicted)
-  # print "Pct correct = %d/%d=%g" % (correct, len(zips), correct * 1.0 / len(zips))
-  return (X_test_games, predicted)
 
 def _predictModel(model, X_test):
   X_test = X_test.copy().dropna()
   X_test['intercept'] = 1.0
   return model.predict(X_test)
+
 
 def trainModel(data, ignore_cols):
   # Validate the data
@@ -479,8 +331,9 @@ def trainModel(data, ignore_cols):
   X_train2 = _splice(_coerceDf(_cloneAndDrop(X_train, ignore_cols)))
 
   y = [int(yval) == 3 for yval in y_train]
-  model = buildModel(y, X_train2, alpha=4.0)
+  model = buildModel(y, X_train2, alpha=8.0)
   return (model, test)
+
 
 def predictModel(model, test, ignore_cols):
   """ Runs a simple predictor that will predict if we expect a team to win. """
@@ -492,44 +345,3 @@ def predictModel(model, test, ignore_cols):
   result['predicted'] = predicted
   return result
 
-def validatePredictions(predictions, base_count):
-
-  count = len(data[target_col])
-
-  base_count = sum([_check_eq(3)(yval) for yval in data[target_col]])
-  baseline = base_count * 1.0 / count
-  y = [_check_eq(3)(yval) for yval in y_test]
-  validate(3, y, predictions, baseline, compute_auc=True)
-  print model.summary()
-  grounded_predictions = [prediction > 0.50 for prediction in predictions]
-  print confusion_matrix(y, grounded_predictions)
-  print zip(X_train['team_name'],X_train['op_team_name'], X_train['matchid'], 
-            grounded_predictions, data[target_col])
-
-def runSimple(data, ignore_cols):
-  """ Runs a simple predictor that will predict if we expect a team to win. """
-    
-  data = prepareData(data)
-  target_col = 'points'
-  (train, test) = split(data)
-  (y_test, X_test) = _extractTarget(test, target_col)
-  (y_train, X_train) = _extractTarget(train, target_col)
-  X_train2 = _splice(_coerceDf(_cloneAndDrop(X_train, ignore_cols)))   
-  X_test2 = _splice(_coerceDf(_cloneAndDrop(X_test, ignore_cols)))
-
-  y = [_check_eq(3)(yval) for yval in y_train]
-  features = X_train2.columns
-  model = buildModel(y, X_train2[features])
-    
-  count = len(data[target_col])
-
-  predictions = _predictModel(model, X_test2[features])
-  base_count = sum([_check_eq(3)(yval) for yval in data[target_col]])
-  baseline = base_count * 1.0 / count
-  y = [_check_eq(3)(yval) for yval in y_test]
-  validate(3, y, predictions, baseline, compute_auc=True)
-  print model.summary()
-  grounded_predictions = [prediction > 0.50 for prediction in predictions]
-  print confusion_matrix(y, grounded_predictions)
-  print zip(X_test['team_name'],X_test['op_team_name'], X_test['matchid'], 
-            grounded_predictions, data[target_col])
