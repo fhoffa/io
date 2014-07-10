@@ -7,18 +7,18 @@ _touch_table = None
 # Table containing games that were played. Allows us to map team ids to team
 # names and figure out which team was home and which team was away.
 _match_games_table = """
-    SELECT * FROM [cloude-sandbox:temp.match_games_with_replacement]
+    SELECT * FROM [cloude-sandbox:public.match_games_table]
 """
 
 # Computing the score of the game is actually fairly tricky to do from the
 # touches table, so we use this view to keep track of game score.
 _match_goals_table = """
-    SELECT * FROM [cloude-sandbox:public.match_goals_table_20140707]
+    SELECT * FROM [cloude-sandbox:public.match_goals_table_20140708]
 """
 
 # View that computes the statistics (features) about the games.
 game_summary = """
-    SELECT * FROM [cloude-sandbox:public.team_game_summary_20140707]
+    SELECT * FROM [cloude-sandbox:public.team_game_summary_20140708]
 """
 
 # Number of games to look at history from in order to predict future performance. 

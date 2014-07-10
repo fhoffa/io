@@ -42,6 +42,7 @@ def _dropUnbalancedMatches(data):
 
   keep = []
   i = 0
+  data = data.dropna()
   while i < len(data) - 1:
     row = data.iloc[i]
     skipped = False
@@ -60,7 +61,11 @@ def _dropUnbalancedMatches(data):
       keep.append(False)
       i += 1
   while len(keep) < len(data): keep.append(False)
-  return data[keep]
+  results = data[keep]
+  if len(results) % 2 <> 0:
+    raise Exception("Unexpected results")
+  return results
+
 
 def _swapPairwise(col):
   """ Swap rows pairwise; i.e. swap row 0 and 1, 2 and 3, etc.  """
@@ -90,6 +95,8 @@ def split(data, test_proportion=0.4):
   """
   
   train_vec = []
+  if len(data) % 2 != 0:
+    raise Exception("Unexpected data length")
   while len(train_vec) < len(data):
     rnd = random.random()
     train_vec.append(rnd > test_proportion) 
@@ -99,9 +106,9 @@ def split(data, test_proportion=0.4):
   train = data[train_vec]
   test = data[test_vec]
   if len(train) % 2 != 0:
-    raise "Unexpected train length"
+    raise Exception("Unexpected train length")
   if len(test) % 2 != 0:
-    raise "Unexpected test length"
+    raise Exception("Unexpected test length")
   return (train, test)
 
 def _extractTarget(data, target_col):
@@ -122,11 +129,11 @@ def buildModelPoisson(y, X, acc=0.0000001):
   return logit.fit_regularized(maxiter=10240, alpha=4.0, acc=acc)
 
 l1_alpha = 16.0
-def buildModel(y, X, acc=None, alpha=l1_alpha):
+def buildModel(y, X, acc=0.00000001, alpha=l1_alpha):
   X = X.copy()
   X['intercept'] = 1.0
   logit = sm.Logit(y, X, disp=False)
-  return logit.fit_regularized(maxiter=10240, alpha=alpha, acc=acc, disp=False)
+  return logit.fit_regularized(maxiter=1024, alpha=alpha, acc=acc, disp=False)
 
 def buildModelMn(y, X, acc=0.0000001, alpha=l1_alpha):
   X = X.copy()
@@ -480,7 +487,7 @@ def _predictModel(model, X_test):
 
 def trainModel(data, ignore_cols):
   # Validate the data
-  data = prepareData(data).dropna()
+  data = prepareData(data)
   target_col = 'points'
   (train, test) = split(data)
   (y_test, X_test) = _extractTarget(test, target_col)
