@@ -1,46 +1,50 @@
+"""
+    Builds statistics about soccer games from touch by touch data.
+
+    For the public version, the raw tables aren't available, but
+    we're including the queries here in order to show what kind
+    of data is available and what kind of statistics are possible.
+"""
+
 # Raw touch-by-touch BigQuery table. This table contains data licensed from Opta
 # and so cannot be shared widely.
-# _touch_table = 'cloude-sandbox:toque.touches'
+# _TOUCH_TABLE = 'cloude-sandbox:toque.touches'
 # Set the touch table to None to use the summary table.
-_touch_table = None
+_TOUCH_TABLE = None
 
 # Table containing games that were played. Allows us to map team ids to team
 # names and figure out which team was home and which team was away.
-_match_games_table = """
+_MATCH_GAMES_TABLE = """
     SELECT * FROM [cloude-sandbox:public.match_games_table]
 """
 
 # Computing the score of the game is actually fairly tricky to do from the
 # touches table, so we use this view to keep track of game score.
-_match_goals_table = """
+_MATCH_GOALS_TABLE = """
     SELECT * FROM [cloude-sandbox:public.match_goals_table_20140708]
 """
 
 # View that computes the statistics (features) about the games.
-game_summary = """
+GAME_SUMMARY = """
     SELECT * FROM [cloude-sandbox:public.team_game_summary_20140708]
 """
 
-# Number of games to look at history from in order to predict future performance. 
-# After the group phase (when we did the initial predictions) we set this value s to 3,
-# since we had 3 games of history in the group phase for each team.
-history_size = 5
-
 # Event type ids from the touches table.
-_pass_id = 1
-_foul_id = 4
-_corner_id = 6
-_shot_ids = [13, 14, 15, 16]
-_goal_id = 16
-_card_id = 17
-_half_id = 32
-_game_id = 34
+_PASS_ID = 1
+_FOUL_ID = 4
+_CORNER_ID = 6
+_SHOT_IDS = [13, 14, 15, 16]
+_SHOT_ID_STRINGS = ','.join([str(sid) for sid in _SHOT_IDS])
+_GOAL_ID = 16
+_CARD_ID = 17
+_HALF_ID = 32
+_GAME_ID = 34
 
 # Qualifiers
-_own_goal_qualifier_id = 28
+_OWN_GOAL_QUALIFIER_ID = 28
 
 # Computes the expected goal statistic, based on shot location.
-_expected_goals_match = """
+_EXPECTED_GOALS_MATCH = """
 SELECT matchid, teamid,
   COUNT(eventid) as sot,
   SUM(typeid = 16) as goals,
@@ -61,7 +65,7 @@ WHERE blck = 0 AND og = 0 AND penfk = 0)
 WHERE dist < 40)
 GROUP BY matchid, teamid
 ORDER BY matchid, teamid
-   """ % {'touch_table': _touch_table}
+   """ % {'touch_table': _TOUCH_TABLE}
 
 # Subquery to compute raw number of goals scored. Does not take
 # into account own-goals (i.e. if a player scores an own-goal against
@@ -69,7 +73,7 @@ ORDER BY matchid, teamid
 # Computes passing statistics. 
 # pass_80: Number of passes completed in the attacking fifth of the field.
 # pass_70: NUmber of passes completed in the attacking third of the field.
-_pass_stats = """
+_PASS_STATS = """
 SELECT matchid, teamid, SUM(pass_80) as pass_80, SUM(pass_70) as pass_70
 FROM (
    SELECT matchid, teamid, outcomeid, 
@@ -77,22 +81,22 @@ FROM (
    if (x > 70 and outcomeid = 1, 1, 0) as pass_70 
   FROM [%(touch_table)s] WHERE typeid = %(pass)s)
 GROUP BY matchid, teamid
-""" % {'touch_table' : _touch_table,
-       'pass': _pass_id}
+""" % {'touch_table' : _TOUCH_TABLE,
+       'pass': _PASS_ID}
 
 # Subquery that tracks own goals so we can later attribute them to
 # the other team.
-_own_goals_by_team_subquery = """
+_OWN_GOALS_BY_TEAM_SUBQUERY = """
 SELECT matchid, teamid, count(*) as own_goals
 FROM [%(touch_table)s] 
 WHERE typeid = %(goal)d AND qualifiers.type = %(own_goal)d 
 GROUP BY matchid, teamid
-""" % {'touch_table': _touch_table,
-       'goal': _goal_id, 
-       'own_goal': _own_goal_qualifier_id}
+""" % {'touch_table': _TOUCH_TABLE,
+       'goal': _GOAL_ID, 
+       'own_goal': _OWN_GOAL_QUALIFIER_ID}
 
 # Subquery that credits an own goal to the opposite team.
-_own_goal_credit_subquery = """
+_OWN_GOAL_CREDIT_SUBQUERY = """
 SELECT games.matchid as matchid, 
   games.teamid as credit_team,
   og.teamid as deduct_team,
@@ -105,14 +109,14 @@ JOIN (
   GROUP BY matchid, teamid) games
 ON og.matchid = games.matchid 
 WHERE games.teamid <> og.teamid
-""" % {'touch_table': _touch_table,
-       'own_goals': _own_goals_by_team_subquery}
+""" % {'touch_table': _TOUCH_TABLE,
+       'own_goals': _OWN_GOALS_BY_TEAM_SUBQUERY}
 
 # Simple query that computes the number of goals in a game
 # (not counting penalty kicks that occur after a draw).
 # This is not sufficient to determine the score, since the
 # data will attribute own goals to the wrong team.
-_raw_goal_and_game_subquery = """
+_RAW_GOAL_AND_GAME_SUBQUERY = """
 SELECT  matchid, teamid, goal, game, timestamp,
 FROM (
   SELECT matchid, teamid, 
@@ -122,22 +126,22 @@ FROM (
     timestamp,
   FROM [%(touch_table)s]
   WHERE typeid in (%(goal)d, %(game)d))
-""" % {'goal': _goal_id, 
-       'game': _game_id,
-       'touch_table': _touch_table}
+""" % {'goal': _GOAL_ID, 
+       'game': _GAME_ID,
+       'touch_table': _TOUCH_TABLE}
 
 # Score by game and team, not adjusted for own goals.
-_raw_goal_by_game_and_team_subquery = """
+_RAW_GOAL_BY_GAME_AND_TEAM_SUBQUERY = """
 SELECT matchid, teamid, SUM(goal) as goals, 
     MAX(TIMESTAMP_TO_USEC(timestamp)) as timestamp,
 FROM (%s)
 GROUP BY matchid, teamid
-""" % (_raw_goal_and_game_subquery)
+""" % (_RAW_GOAL_AND_GAME_SUBQUERY)
 
 # Compute the number of goals in the game. To do this, we want to subtract off
 # any own goals a team scored against themselves, and add the own goals that a
 # team's opponent scored.
-_match_goals_subquery = """
+MATCH_GOALS_QUERY = """
 SELECT matchid, teamid , goals + delta as goals, timestamp as timestamp 
 FROM (
     SELECT goals.matchid as matchid , goals.teamid as teamid,
@@ -151,9 +155,9 @@ FROM (
     LEFT OUTER JOIN (%s) de
     ON goals.matchid = de.matchid and goals.teamid = de.deduct_team
 )
-""" % (_raw_goal_by_game_and_team_subquery,
-       _own_goal_credit_subquery,
-       _own_goal_credit_subquery)
+""" % (_RAW_GOAL_BY_GAME_AND_TEAM_SUBQUERY,
+       _OWN_GOAL_CREDIT_SUBQUERY,
+       _OWN_GOAL_CREDIT_SUBQUERY)
 
 # Query that summarizes statistics by team and by game.
 # Statistics computed are:
@@ -170,7 +174,7 @@ FROM (
 # expected_goals: number of goals expected given the number and location 
 #     of shots on goal.
 # on_target: number of shots on target per minute
-_team_game_summary = """
+_TEAM_GAME_SUMMARY = """
 SELECT 
 t.matchid as matchid,
 t.teamid as teamid,
@@ -206,8 +210,8 @@ FROM (
   FROM (
     SELECT matchid, teamid,       
       timestamp, [min],
-      if (typeid == %(pass)d and outcomeid = 1, 1, 0) as pass,
-      if (typeid == %(pass)d and outcomeid = 0, 1, 0) as bad_pass,
+      if (typeid == %(pass_id)d and outcomeid = 1, 1, 0) as pass,
+      if (typeid == %(pass_id)d and outcomeid = 0, 1, 0) as bad_pass,
       if (typeid == %(foul)d and outcomeid = 1, 1, 0) as foul,
       if (typeid == %(corner)d and outcomeid = 1, 1, 0) as corner,
       if (typeid == %(half)d, 1, 0) as halves,
@@ -227,22 +231,22 @@ JOIN  (%(match_games)s) h
 ON t.matchid = h.matchid AND t.teamid = h.teamid
 LEFT OUTER JOIN (%(expected_goals)s) x
 ON t.matchid = x.matchid AND t.teamid = x.teamid
-""" % {'pass': _pass_id,
-       'foul': _foul_id,
-       'corner': _corner_id,
-       'half': _half_id,
-       'shots': ','.join([str(id) for id in _shot_ids]),
-       'card': _card_id,
-       'pass_stats': _pass_stats,
-       'expected_goals': _expected_goals_match,
-       'touch_table': _touch_table,
-       'match_games': _match_games_table,
-       'match_goals': _match_goals_table}
+""" % {'pass_id': _PASS_ID,
+       'foul': _FOUL_ID,
+       'corner': _CORNER_ID,
+       'half': _HALF_ID,
+       'shots':  _SHOT_ID_STRINGS,
+       'card': _CARD_ID,
+       'pass_stats': _PASS_STATS,
+       'expected_goals': _EXPECTED_GOALS_MATCH,
+       'touch_table': _TOUCH_TABLE,
+       'match_games': _MATCH_GAMES_TABLE,
+       'match_goals': _MATCH_GOALS_TABLE}
 
 
 # Some of the games in the touches table have been ingested twice. If that
 # is the case, scale the game statistics.
-_team_game_summary_corrected = """
+_TEAM_GAME_SUMMARY_CORRECTED = """
 SELECT 
 t.matchid as matchid,
 t.teamid as teamid,
@@ -275,37 +279,44 @@ FROM (
 ) GROUP BY matchid
 ) s ON t.matchid = s.matchid
 """ % {
-       'team_game_summary': _team_game_summary,
-       'touches_table': _touch_table}
+       'team_game_summary': _TEAM_GAME_SUMMARY,
+       'touches_table': _TOUCH_TABLE}
 
 ###
 ### Public queries / methods
 ###
 
-# Query that returns query statistics for both teams in a game.
 def team_game_summary_query(): 
-  if _touch_table:
-    return _team_game_summary_corrected
-  else:
-    return game_summary
+    """ Query that returns query statistics for both teams in a game. """
+    if _TOUCH_TABLE:
+        return _TEAM_GAME_SUMMARY_CORRECTED
+    else:
+        return GAME_SUMMARY
   
-def match_goals_table(): return _match_goals_table
-def match_games_table(): return _match_games_table
+def match_goals_table():
+    """ Returns the name of a table with goals scored per match. """
+    return _MATCH_GOALS_TABLE
 
-# Returns a list of the columns that are in our features dataframe that
-# should not be used in prediction. These are essentially either metadata
-# columns (team name, for example), or potential target variables that
-# include the outcome. We want to make sure not to use the latter, since
-# we don't want to use information about the current game to predict that
-# same game.
+def match_games_table():
+    """ Returns the name of a table containing basic data about matches. """
+    return _MATCH_GAMES_TABLE
+
 def get_non_feature_columns():
-  return ['teamid', 'op_teamid', 'matchid', 'competitionid', 'seasonid',
-          'goals', 'op_goals', 'points', 'timestamp', 'team_name', 
-          'op_team_name']
+    """ Returns a list of the columns that are in our features dataframe that
+        should not be used in prediction. These are essentially either metadata
+        columns (team name, for example), or potential target variables that
+        include the outcome. We want to make sure not to use the latter, since
+        we don't want to use information about the current game to predict that
+        same game.
+    """
+    return ['teamid', 'op_teamid', 'matchid', 'competitionid', 'seasonid',
+            'goals', 'op_goals', 'points', 'timestamp', 'team_name', 
+            'op_team_name']
 
-# Returns a list of all columns that should be used in prediction (i.e. all
-# features that are in the dataframe but are not in the 
-# features.get_non_feature_column() list).
 def get_feature_columns(all_cols):
-  return [col for col in all_cols if col not in get_non_feature_columns()]
+    """ Returns a list of all columns that should be used in prediction
+        (i.e. all features that are in the dataframe but are not in the 
+        features.get_non_feature_column() list).
+    """
+    return [col for col in all_cols if col not in get_non_feature_columns()]
 

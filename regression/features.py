@@ -1,13 +1,19 @@
+"""
+    Turns raw statistics about soccer matches into features we use
+    for prediction. Combines a number of games of history to compute
+    aggregates that can be used to predict the next game.
+"""
+
 from pandas.io import gbq
 
 import match_stats
 
 # Games that have stats available. Not all games in the match_games table
 # will have stats (e.g. they might be in the future).
-match_game_with_stats = """
+MATCH_GAME_WITH_STATS = """
     SELECT * FROM (%(match_games)s)
     WHERE matchid in (
-      SELECT matchid FROM (%(stats_table)s) GROUP BY matchid)
+        SELECT matchid FROM (%(stats_table)s) GROUP BY matchid)
     """ % {'match_games': match_stats.match_games_table(),
            'stats_table': match_stats.team_game_summary_query()}        
 
@@ -18,7 +24,7 @@ match_game_with_stats = """
 # into a single row (m, t1, t2, <stats1>, <stats2>) where all of the
 # t2 field names are decorated with the op_ prefix. For example, teamid becomes
 # op_teamid, and pass_70 becomes op_pass_70.
-_team_game_op_summary =  """
+_TEAM_GAME_OP_SUMMARY =  """
     SELECT cur.matchid as matchid,
       cur.teamid as teamid,
       cur.passes as passes,
@@ -74,11 +80,13 @@ _team_game_op_summary =  """
       """ % {'team_game_summary': match_stats.team_game_summary_query()}
 
 
-# For each team t in each game g, computes the N previous game ids where team t
-# played, where N is the history_size (number of games of history we
-# use for prediction). The statistics of the N previous games will be used
-# to predict the outcome of game g.
 def get_match_history(history_size): 
+    """ For each team t in each game g, computes the N previous game 
+        ids where team t played, where N is the history_size (number
+        of games of history we use for prediction). The statistics of
+        the N previous games will be used to predict the outcome of 
+        game g.
+    """
     return """
         SELECT h.teamid as teamid, h.matchid as matchid,
         h.timestamp as timestamp, 
@@ -109,11 +117,11 @@ def get_match_history(history_size):
         m1.timestamp <= h.last_match_timestamp 
 
         """ % {'history_size': history_size, 
-               'match_games_with_stats': match_game_with_stats,
-                 'match_games': match_stats.match_games_table()}
+               'match_games_with_stats': MATCH_GAME_WITH_STATS,
+               'match_games': match_stats.match_games_table()}
 
-# Computes summary statistics for the N preceeding matches.
 def get_history_query(history_size): 
+    """ Computes summary statistics for the N preceeding matches. """
     return """
         SELECT  
             summary.matchid as matchid,
@@ -193,16 +201,17 @@ def get_history_query(history_size):
             and summary.teamid = pts.teamid
         WHERE summary.matchid <> '442291'
         ORDER BY matchid, is_home DESC
-        """ % {'team_game_op_summary': _team_game_op_summary,
+        """ % {'team_game_op_summary': _TEAM_GAME_OP_SUMMARY,
                'match_games': match_stats.match_games_table(),
                'match_history': get_match_history(history_size)}
 
-# Expands the history_query, which summarizes statistics from past games
-# with the result of who won the current game. This information will not
-# be availble for future games that we want to predict, but it will be
-# available for past games. We can then use this information to train our
-# models.
 def get_history_query_with_goals(history_size):
+    """ Expands the history_query, which summarizes statistics from past games
+        with the result of who won the current game. This information will not
+        be availble for future games that we want to predict, but it will be
+        available for past games. We can then use this information to train our
+        models.
+    """
     return """
         SELECT   
             h.matchid as matchid,
@@ -258,45 +267,30 @@ def get_history_query_with_goals(history_size):
         """ % {'history_query': get_history_query(history_size),
                'match_goals': match_stats.match_goals_table()}
 
-# Identical to the history_query (which, remember, does not have
-# outcomes).
 def get_wc_history_query(history_size): 
+    """ Identical to the history_query (which, remember, does not have
+        outcomes) but gets history for world-cup games.
+    """
     return """
         SELECT * FROM (%(history_query)s) WHERE competitionid = 4
         ORDER BY timestamp DESC, matchid, is_home 
         """ % {'history_query': get_history_query(history_size)}
 
-# Runs a bigquery query that gets the features that can be used
-# to predict the world cup.
 def get_wc_features(history_size):
+    """ Runs a bigquery query that gets the features that can be used
+        to predict the world cup.
+    """
     return gbq.read_gbq(get_wc_history_query(history_size))
 
-# Runs a BigQuery query to get features that can be used to train
-# a machine learning model.
 def get_features(history_size):
+    """ Runs a BigQuery query to get features that can be used to train
+         a machine learning model.
+    """
     return gbq.read_gbq(get_history_query_with_goals(history_size))
 
-# Runs a BigQuery Query that gets game summaries.
 def get_game_summaries():
+    """ Runs a BigQuery Query that gets game summaries. """
     return gbq.read_gbq("""
         SELECT * FROM (%(team_game_op_summary)s) 
         ORDER BY timestamp DESC, matchid, is_home 
-        """ % {'team_game_op_summary': _team_game_op_summary})
-
-# Returns a list of the columns that are in our features dataframe that
-# should not be used in prediction. These are essentially either metadata
-# columns (team name, for example), or potential target variables that
-# include the outcome. We want to make sure not to use the latter, since
-# we don't want to use information about the current game to predict that
-# same game.
-def get_non_feature_columns():
-    return ['teamid', 'op_teamid', 'matchid', 'competitionid', 'seasonid',
-            'goals', 'op_goals', 'points', 'timestamp', 'team_name', 
-            'op_team_name']
-
-# Returns a list of all columns that should be used in prediction (i.e. all
-# features that are in the dataframe but are not in the 
-# features.get_non_feature_column() list).
-def get_feature_columns(all_cols):
-    return [col for col in all_cols if col not in get_non_feature_columns()]
-
+        """ % {'team_game_op_summary': _TEAM_GAME_OP_SUMMARY})

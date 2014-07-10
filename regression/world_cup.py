@@ -1,22 +1,6 @@
 """
     Predicts soccer outcomes using logistic regression.
 
-    How to run:
-import features
-
-# Read the features from bigquery.
-data = features.get_features()
-
-not_train_cols = features.get_non_feature_columns() 
-
-# There are three different ways of running the prediction. 
-# The simplest is:
-world_cup.runSimple(data, not_train_cols)
-
-# The best (currently) is:
-world_cup.runGameNoDraw(data, not_train_cols)
-
-# world_cup.runTeam(data, not_train_cols)
 """
 
 import numpy as np
